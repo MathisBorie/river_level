@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+donnees_travail/
+cartes_html/
+webapp/data/
+
+# données mises en cache (artefacts)
+webapp/*.csv
