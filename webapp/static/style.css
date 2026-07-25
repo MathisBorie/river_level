@@ -399,6 +399,9 @@ table.params .case { display: inline-flex; margin: 0 10px 0 0; }
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   line-height: 1.5; white-space: pre-wrap;
 }
+.ligne-modele { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 0.9rem; font-weight: 600; }
+.ligne-modele select { flex: 1; }
+
 /* coin d'ancrage choisi par l'utilisateur (défaut = bas-droite) */
 #barre-job.coin-bl { left: 16px; right: auto; }
 #barre-job.coin-tr { top: calc(var(--entete-h) + 10px); bottom: auto; }

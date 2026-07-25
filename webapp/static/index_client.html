@@ -76,6 +76,13 @@
         <p class="aide">Trouve automatiquement les meilleurs points météo (altitude, couverture, puis
         corrélation pluie→débit + neige), télécharge l'historique et entraîne le modèle de prévision.
         <br><span id="periode-dispo">période : …</span></p>
+        <label class="ligne-modele">Modèle :
+          <select id="opt-modele">
+            <option value="gradient_boosting" selected>Gradient Boosting (recommandé)</option>
+            <option value="ridge">Ridge</option>
+            <option value="lineaire">Régression linéaire</option>
+          </select>
+        </label>
         <button id="btn-pipeline" class="primaire grand">Analyser cette rivière</button>
         <p class="aide" id="analyse-diagnostic" style="margin:12px 0 0"></p>
         <p class="aide credit-projet">Projet de <b>Mathis Borie</b> (École des Ponts) —
@@ -229,7 +236,6 @@
             <td colspan="2">
               <select id="opt-methode-selection">
                 <option value="deux_temps">2 temps : altitude+couverture (gratuit) → corrélation+neige (léger)</option>
-                <option value="genetique">génétique (ancien, plus lourd en API/temps)</option>
               </select>
             </td>
           </tr>
@@ -256,8 +262,8 @@
         </tbody>
       </table>
       <p class="aide" id="cout-estimation" style="margin:6px 0 0"></p>
-      <div class="rangee-boutons">
-        <button id="btn-donnees" class="secondaire" title="Télécharge les données complètes sur les points actuels, sans entraîner">📥 Recevoir les données seules</button>
+      <div class="rangee-boutons" style="display:none">
+        <button id="btn-donnees" class="secondaire">📥 Recevoir les données seules</button>
       </div>
     </div>
 
@@ -265,55 +271,33 @@
       <h3>🧠 Modèles</h3>
       <div id="tableau-modeles">Aucun modèle entraîné pour l'instant.</div>
 
-      <p class="aide">Entraîner un modèle isolé (chacun + son incertitude, sauvegarde auto) :</p>
+      <p class="aide">Entraîner un autre modèle sur les données déjà téléchargées (instantané, pas de nouveau téléchargement) :</p>
       <div class="rangee-boutons" id="boutons-modeles">
         <button class="secondaire btn-un-modele" data-modele="gradient_boosting">Gradient Boosting</button>
-        <button class="secondaire btn-un-modele" data-modele="ridge_brut">Ridge</button>
-        <button class="secondaire btn-un-modele" data-modele="ridge_causal" title="Masquage causal : pour prédire J+k, n'utilise que la météo ≤ J+k (et ≤ J+15) — recommandé pour les horizons lointains">Ridge causal</button>
-        <button class="secondaire btn-un-modele" data-modele="lineaire_pca">Linéaire (PCA)</button>
-        <button class="secondaire btn-un-modele" data-modele="keras_brut">Keras</button>
+        <button class="secondaire btn-un-modele" data-modele="ridge">Ridge</button>
+        <button class="secondaire btn-un-modele" data-modele="lineaire">Régression linéaire</button>
       </div>
 
       <table class="params">
         <tbody>
           <tr>
-            <th>Espace des features</th>
-            <td colspan="2" class="ind">
-              Ridge / Gradient Boosting / Keras : <b>brut</b> · Linéaire : <b>PCA</b>
-              (Ridge causal : brut + masquage).
-            </td>
-          </tr>
-          <tr>
-            <th>PCA — énergie conservée</th>
-            <td>
-              <select id="opt-pca-energie">
-                <option value="99">99 % (≈90 comp.)</option>
-                <option value="95">95 % (≈19 comp., très compressé)</option>
-                <option value="999">99,9 % (peu de perte)</option>
-              </select>
-            </td>
-            <td class="ind">n'affecte que le modèle Linéaire (PCA)</td>
-          </tr>
-          <tr>
             <th>Entraîner en lot</th>
             <td colspan="2" id="cases-modeles">
-              <label class="case"><input type="checkbox" class="case-modele" value="gradient_boosting" checked> GB</label>
-              <label class="case"><input type="checkbox" class="case-modele" value="ridge_brut" checked> Ridge</label>
-              <label class="case"><input type="checkbox" class="case-modele" value="ridge_causal" checked> Ridge causal</label>
-              <label class="case"><input type="checkbox" class="case-modele" value="lineaire_pca" checked> Linéaire (PCA)</label>
-              <label class="case"><input type="checkbox" class="case-modele" value="keras_brut" checked> Keras</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="gradient_boosting" checked> Gradient Boosting</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="ridge" checked> Ridge</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="lineaire" checked> Régression linéaire</label>
             </td>
-          </tr>
-          <tr>
-            <th>Incertitude (réseau de variance)</th>
-            <td colspan="2"><label class="case"><input type="checkbox" id="opt-incertitude" checked> entraîner aussi les intervalles de confiance</label></td>
           </tr>
         </tbody>
       </table>
       <div class="rangee-boutons">
-        <button id="btn-pca" class="secondaire">Appliquer la PCA</button>
-        <button id="btn-entrainer" class="secondaire">Entraîner la sélection</button>
+        <button id="btn-entrainer" class="secondaire">Entraîner les modèles cochés</button>
       </div>
+
+      <!-- éléments propres à la version serveur (PCA/Keras/incertitude), gardés cachés -->
+      <select id="opt-pca-energie" class="cache"><option value="99" selected>99</option></select>
+      <label class="cache"><input type="checkbox" id="opt-incertitude"></label>
+      <button id="btn-pca" class="secondaire cache">Appliquer la PCA</button>
       <img id="image-pca" class="graphique cache" alt="Analyse PCA">
     </div>
 

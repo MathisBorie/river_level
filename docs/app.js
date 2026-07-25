@@ -179,8 +179,9 @@ function rendreFanChart(canvasId, data, avecReel) {
 
 // Ligne de fiabilité (R²) affichée à CHAQUE prévision / test.
 const NOMS_MODELES = {
-  gradient_boosting: "Gradient Boosting", ridge_causal: "Ridge causal",
-  ridge_brut: "Ridge", lineaire_pca: "Linéaire (PCA)", keras_brut: "Réseau de neurones",
+  gradient_boosting: "Gradient Boosting", ridge: "Ridge", lineaire: "Régression linéaire",
+  // (noms de la version serveur, conservés pour compat)
+  ridge_causal: "Ridge causal", ridge_brut: "Ridge", lineaire_pca: "Linéaire (PCA)", keras_brut: "Réseau de neurones",
 };
 function classeR2(pct) { return pct >= 70 ? "" : pct >= 50 ? "moyen" : "faible"; }
 function rendreFiabilite(elemId, data) {
@@ -693,7 +694,7 @@ $("btn-annuler-selection").addEventListener("click", quitterModeSelection);
 $("btn-lancer-points").addEventListener("click", async () => {
   if (!etat.pointsChoisis.length) return toast("Place au moins un point sur la carte.", true);
   const points = etat.pointsChoisis.map((p) => [p.lat, p.lon]);
-  const corps = { points, ...paramsDonnees() };
+  const corps = { points, modele: $("opt-modele").value, ...paramsDonnees() };
   try {
     const { job_id } = await post(`/api/riviere/${etat.code}/points`, corps);
     quitterModeSelection();
@@ -749,6 +750,7 @@ $("btn-pipeline").addEventListener("click", async () => {
   const methode = $("opt-methode-selection").value;
   const corps = {
     methode,
+    modele: $("opt-modele").value,
     // paramètres de construction des données (communs aux deux méthodes)
     past_day: parseInt($("opt-past-day").value) || 20,
     predict_day: parseInt($("opt-predict-day").value) || 15,
@@ -967,23 +969,21 @@ function rendreModeles() {
     conteneur.innerHTML = "<p class='aide'>Aucun modèle entraîné : lance le pipeline (ou choisis tes points à la main).</p>";
   } else {
     conteneur.innerHTML =
-      "<table><tr><th>Modèle</th><th>R²</th><th>Espace</th><th>Incertitude</th></tr>" +
+      "<table><tr><th>Modèle</th><th>R²</th></tr>" +
       r.modeles
         .map(
           (m) =>
-            `<tr><td>${m.nom}</td><td><b>${(m.score * 100).toFixed(1)} %</b></td>` +
-            `<td>${m.espace}</td><td>${m.hybride ? "✅" : "—"}</td></tr>`
+            `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(1)} %</b></td></tr>`
         )
         .join("") +
       "</table>";
   }
 
-  const options = r.modeles.map((m) => `<option value="${m.nom}">${m.nom}</option>`).join("");
+  const options = r.modeles.map((m) => `<option value="${m.nom}">${NOMS_MODELES[m.nom] || m.nom}</option>`).join("");
   $("backtest-modele").innerHTML = options;
   $("prevision-modele").innerHTML = options;
-  // Modèle par défaut = le meilleur disponible (le sélecteur est masqué au grand
-  // public ; on prédit avec le meilleur sans qu'il ait à choisir).
-  const prefere = ["gradient_boosting", "ridge_causal", "keras_brut", "ridge_brut", "lineaire_pca"]
+  // Modèle par défaut = le meilleur disponible (Gradient Boosting en tête).
+  const prefere = ["gradient_boosting", "ridge", "lineaire"]
     .find((n) => r.modeles.some((m) => m.nom === n));
   if (prefere) {
     $("backtest-modele").value = prefere;
