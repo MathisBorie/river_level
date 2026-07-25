@@ -1,0 +1,3 @@
+flask>=3
+joblib
+# le reste (tensorflow, scikit-learn, folium, deap, shapely, requests, pandas, numpy, tqdm) est deja requis par river.py

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>River Lab — prévision de débit</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="overlay-chargement">
+  <div class="spin"></div>
+  <div class="titre">🌊 River Lab</div>
+  <div class="msg">Démarrage du moteur dans ton navigateur (Python + scikit-learn)…<br>Le 1er chargement récupère ~15 Mo (mis en cache ensuite).</div>
+</div>
+
+<header>
+  <h1>🌊 River Lab</h1>
+  <span id="sous-titre">Prévision du débit des rivières de France</span>
+  <a id="credit-auteur" href="mailto:mathis.borie@enpc.fr" title="Contacter l'auteur">Mathis&nbsp;Borie · mathis.borie@enpc.fr</a>
+  <button id="btn-retour" class="cache">← Toutes les stations</button>
+</header>
+
+<!-- ================= VUE 1 : CARTE DES STATIONS ================= -->
+<section id="vue-stations">
+  <div class="barre-outils">
+    <input id="recherche-station" type="search" placeholder="Rechercher une station (nom, cours d'eau, code)…">
+    <label class="case"><input type="checkbox" id="filtre-service" checked> En service seulement</label>
+    <span id="compteur-stations"></span>
+  </div>
+  <div id="carte-stations"></div>
+</section>
+
+<!-- ================= VUE 2 : UNE STATION ================= -->
+<section id="vue-station" class="cache">
+  <div class="entete-station">
+    <div class="entete-titre">
+      <h2 id="titre-station">…</h2>
+      <div id="badges-station"></div>
+    </div>
+    <button id="btn-ouvrir-reglages" class="secondaire bouton-reglages" title="Paramètres avancés et entraînement des modèles">⚙️ Réglages &amp; apprentissage</button>
+  </div>
+  <div id="banniere-avertissement" class="cache"></div>
+
+  <div class="scene" id="scene">
+    <!-- 1. CARTE -->
+    <article class="panneau" data-panneau="carte">
+      <button class="panneau-tete" type="button">
+        <span class="panneau-icone">🗺️</span>
+        <span class="panneau-titre">Carte des points</span>
+        <span class="panneau-etat" id="etat-carte"></span>
+      </button>
+      <div class="panneau-corps corps-carte">
+        <div class="carte-outils">
+          <button id="btn-zones" class="secondaire">📍 Trouver les points (bassins versants)</button>
+          <button id="btn-mode-selection" class="secondaire cache">✏️ Choisir mes points à la main</button>
+          <button id="btn-lancer-points" class="primaire cache">Utiliser ces points (<span id="nb-points-choisis">0</span>)</button>
+          <button id="btn-annuler-selection" class="secondaire cache">Annuler</button>
+        </div>
+        <div id="carte-zone"></div>
+        <div id="legende-carte" style="display:none"></div>
+        <div id="liens-folium"></div>
+      </div>
+    </article>
+
+    <!-- 2. ANALYSE -->
+    <article class="panneau" data-panneau="analyse">
+      <button class="panneau-tete" type="button">
+        <span class="panneau-icone">🔍</span>
+        <span class="panneau-titre">Analyser la rivière</span>
+        <span class="panneau-etat" id="etat-analyse"></span>
+      </button>
+      <div class="panneau-corps">
+        <p class="aide">Trouve automatiquement les meilleurs points météo (altitude, couverture, puis
+        corrélation pluie→débit + neige), télécharge l'historique et entraîne le modèle de prévision.
+        <br><span id="periode-dispo">période : …</span></p>
+        <button id="btn-pipeline" class="primaire grand">Analyser cette rivière</button>
+        <p class="aide" id="analyse-diagnostic" style="margin:12px 0 0"></p>
+        <p class="aide credit-projet">Projet de <b>Mathis Borie</b> (École des Ponts) —
+          <a href="mailto:mathis.borie@enpc.fr">mathis.borie@enpc.fr</a></p>
+      </div>
+    </article>
+
+    <!-- 3. PRÉDICTION -->
+    <article class="panneau" data-panneau="prediction">
+      <button class="panneau-tete" type="button">
+        <span class="panneau-icone">🔮</span>
+        <span class="panneau-titre">Débit prévu</span>
+        <span class="panneau-etat" id="etat-prediction"></span>
+      </button>
+      <div class="panneau-corps corps-graphe">
+        <div class="barre-controles">
+          <label>Modèle <select id="prevision-modele"></select></label>
+          <label>Jours <input id="prevision-jours" type="number" value="15" min="1" max="100"></label>
+          <label class="case"><input type="checkbox" id="prevision-hybride" checked> Intervalles</label>
+          <button id="btn-prevision" class="primaire">Prédire</button>
+          <button class="info-btn" type="button" data-popover="pop-prevision" title="Détails et tableau">ⓘ</button>
+        </div>
+        <div class="ligne-fiabilite cache" id="fiab-prevision"></div>
+        <div class="zone-graphe"><canvas id="chart-prevision"></canvas>
+          <div class="graphe-vide" id="vide-prevision">Clique sur « Prédire » pour afficher la prévision.</div>
+        </div>
+        <div class="popover cache" id="pop-prevision">
+          <p class="aide">Prévision du débit à partir d'aujourd'hui, avec sa marge d'incertitude (survole la courbe pour lire les valeurs).</p>
+          <div id="tableau-prevision"></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- 4. TEST PASSÉ -->
+    <article class="panneau" data-panneau="test">
+      <button class="panneau-tete" type="button">
+        <span class="panneau-icone">🎯</span>
+        <span class="panneau-titre">Test sur le passé</span>
+        <span class="panneau-etat" id="etat-test"></span>
+      </button>
+      <div class="panneau-corps corps-graphe">
+        <div class="barre-controles">
+          <label>Modèle <select id="backtest-modele"></select></label>
+          <label>Date <input id="backtest-date" type="date"></label>
+          <label>Jours <input id="backtest-jours" type="number" value="15" min="1" max="100"></label>
+          <label class="case"><input type="checkbox" id="backtest-hybride" checked> Intervalles</label>
+          <button id="btn-backtest" class="primaire">Tester</button>
+          <button class="info-btn" type="button" data-popover="pop-backtest" title="Scores par horizon">ⓘ</button>
+        </div>
+        <div class="ligne-fiabilite cache" id="fiab-backtest"></div>
+        <div class="zone-graphe"><canvas id="chart-backtest"></canvas>
+          <div class="graphe-vide" id="vide-backtest">Choisis une date et clique « Tester » : la prévision du modèle est comparée à la réalité.</div>
+        </div>
+        <div class="popover cache" id="pop-backtest">
+          <p class="aide">Prévision du modèle (bleu) vs réalité (rouge). Fiabilité R² par horizon :</p>
+          <div id="scores-detail"></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- 5. DÉBIT PASSÉ -->
+    <article class="panneau" data-panneau="historique">
+      <button class="panneau-tete" type="button">
+        <span class="panneau-icone">📈</span>
+        <span class="panneau-titre">Débit passé</span>
+        <span class="panneau-etat" id="etat-historique"></span>
+      </button>
+      <div class="panneau-corps corps-graphe">
+        <div class="barre-controles">
+          <label>Du <input id="historique-debut" type="date"></label>
+          <label>Au <input id="historique-fin" type="date"></label>
+          <button id="btn-historique" class="primaire">Afficher</button>
+          <button class="info-btn" type="button" data-popover="pop-historique" title="Statistiques">ⓘ</button>
+        </div>
+        <div class="zone-graphe"><canvas id="chart-historique"></canvas>
+          <div class="graphe-vide" id="vide-historique">Choisis deux dates et clique « Afficher ».</div>
+        </div>
+        <div class="popover cache" id="pop-historique">
+          <p class="aide">Débit moyen journalier observé (Hub'Eau).</p>
+          <div id="stats-historique"></div>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ================= TIROIR : RÉGLAGES & APPRENTISSAGE (avancé) ================= -->
+<div id="drawer-fond" class="cache"></div>
+<aside id="drawer-reglages" class="cache" aria-label="Réglages et apprentissage">
+  <div class="drawer-entete">
+    <h3>⚙️ Réglages &amp; apprentissage</h3>
+    <button id="btn-fermer-reglages" class="secondaire">✕</button>
+  </div>
+  <div class="drawer-corps">
+    <p class="aide">Tout ce qui concerne la sélection des points, le téléchargement des données et
+    l'entraînement des modèles. Les valeurs par défaut conviennent dans la plupart des cas —
+    le bouton « Analyser cette rivière » les utilise directement.</p>
+
+    <div class="carte-ui" id="carte-pipeline">
+      <h3>🎯 Sélection des points &amp; données</h3>
+      <table class="params">
+        <tbody>
+          <tr>
+            <th>Fenêtre d'apprentissage</th>
+            <td colspan="2">
+              du <input id="opt-train-debut" type="date">
+              au <input id="opt-train-fin" type="date">
+            </td>
+          </tr>
+          <tr>
+            <th>Jours passés utilisés <span class="ind">(pour prédire)</span></th>
+            <td><input id="opt-past-day" type="number" value="20" min="1" max="60"></td>
+            <td class="ind">historique de débit + météo en entrée</td>
+          </tr>
+          <tr>
+            <th>Jours à prédire <span class="ind">(horizon)</span></th>
+            <td><input id="opt-predict-day" type="number" value="15" min="1" max="100"></td>
+            <td class="ind">au-delà de ~15 j, météo = saison</td>
+          </tr>
+          <tr>
+            <th>Découpage train / test</th>
+            <td colspan="2">
+              <select id="opt-mode-split">
+                <option value="annees_aleatoires">années tirées au sort (recommandé)</option>
+                <option value="chronologique">chronologique (80 % / 20 %)</option>
+              </select>
+              part test <input id="opt-part-test" type="number" value="0.2" min="0.05" max="0.5" step="0.05" style="width:70px">
+            </td>
+          </tr>
+          <tr>
+            <th>Température</th>
+            <td colspan="2">
+              <select id="opt-agg-temp">
+                <option value="moyenne">moyenne journalière (léger, ~130 dim)</option>
+                <option value="horaire">horaire, 24 valeurs (lourd, ~1800 dim)</option>
+              </select>
+            </td>
+          </tr>
+          <tr>
+            <th>Neige</th>
+            <td colspan="2">
+              <select id="opt-agg-neige">
+                <option value="minuit">à minuit (stock, 1 valeur)</option>
+                <option value="moyenne">moyenne journalière</option>
+                <option value="horaire">horaire, 24 valeurs</option>
+              </select>
+            </td>
+          </tr>
+          <tr>
+            <th>Méthode de sélection des points</th>
+            <td colspan="2">
+              <select id="opt-methode-selection">
+                <option value="deux_temps">2 temps : altitude+couverture (gratuit) → corrélation+neige (léger)</option>
+                <option value="genetique">génétique (ancien, plus lourd en API/temps)</option>
+              </select>
+            </td>
+          </tr>
+          <tr id="ligne-deux-temps">
+            <th>Points météo <span class="ind">(présélection → finaux)</span></th>
+            <td colspan="2">
+              présélection <input id="opt-n-preselection" type="number" value="30" min="5" max="120" style="width:70px" title="Nombre de points gardés à l'étape 1 (gratuite, sur altitude+couverture)">
+              → finaux <input id="opt-n-final" type="number" value="5" min="1" max="20" style="width:60px" title="Nombre de points retenus au final (étape 2, corrélation pluie→débit + neige)">
+              <span class="ind" style="display:block">poids
+                pluie <input id="opt-poids-pluie" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
+                neige <input id="opt-poids-neige" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
+                altitude <input id="opt-poids-altitude" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
+              </span>
+            </td>
+          </tr>
+          <tr id="ligne-genetique" style="display:none">
+            <th>Sélection génétique</th>
+            <td colspan="2">
+              population <input id="opt-population" type="number" value="20" min="4" style="width:70px">
+              générations <input id="opt-generations" type="number" value="50" min="1" style="width:70px">
+              horizon <input id="opt-ga-horizon" type="number" value="3" min="1" max="15" style="width:60px" title="Horizon (jours) utilisé pour classer les points pendant le GA — 3 suffit et va vite">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="aide" id="cout-estimation" style="margin:6px 0 0"></p>
+      <div class="rangee-boutons">
+        <button id="btn-donnees" class="secondaire" title="Télécharge les données complètes sur les points actuels, sans entraîner">📥 Recevoir les données seules</button>
+      </div>
+    </div>
+
+    <div class="carte-ui" id="carte-modeles">
+      <h3>🧠 Modèles</h3>
+      <div id="tableau-modeles">Aucun modèle entraîné pour l'instant.</div>
+
+      <p class="aide">Entraîner un modèle isolé (chacun + son incertitude, sauvegarde auto) :</p>
+      <div class="rangee-boutons" id="boutons-modeles">
+        <button class="secondaire btn-un-modele" data-modele="gradient_boosting">Gradient Boosting</button>
+        <button class="secondaire btn-un-modele" data-modele="ridge_brut">Ridge</button>
+        <button class="secondaire btn-un-modele" data-modele="ridge_causal" title="Masquage causal : pour prédire J+k, n'utilise que la météo ≤ J+k (et ≤ J+15) — recommandé pour les horizons lointains">Ridge causal</button>
+        <button class="secondaire btn-un-modele" data-modele="lineaire_pca">Linéaire (PCA)</button>
+        <button class="secondaire btn-un-modele" data-modele="keras_brut">Keras</button>
+      </div>
+
+      <table class="params">
+        <tbody>
+          <tr>
+            <th>Espace des features</th>
+            <td colspan="2" class="ind">
+              Ridge / Gradient Boosting / Keras : <b>brut</b> · Linéaire : <b>PCA</b>
+              (Ridge causal : brut + masquage).
+            </td>
+          </tr>
+          <tr>
+            <th>PCA — énergie conservée</th>
+            <td>
+              <select id="opt-pca-energie">
+                <option value="99">99 % (≈90 comp.)</option>
+                <option value="95">95 % (≈19 comp., très compressé)</option>
+                <option value="999">99,9 % (peu de perte)</option>
+              </select>
+            </td>
+            <td class="ind">n'affecte que le modèle Linéaire (PCA)</td>
+          </tr>
+          <tr>
+            <th>Entraîner en lot</th>
+            <td colspan="2" id="cases-modeles">
+              <label class="case"><input type="checkbox" class="case-modele" value="gradient_boosting" checked> GB</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="ridge_brut" checked> Ridge</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="ridge_causal" checked> Ridge causal</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="lineaire_pca" checked> Linéaire (PCA)</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="keras_brut" checked> Keras</label>
+            </td>
+          </tr>
+          <tr>
+            <th>Incertitude (réseau de variance)</th>
+            <td colspan="2"><label class="case"><input type="checkbox" id="opt-incertitude" checked> entraîner aussi les intervalles de confiance</label></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="rangee-boutons">
+        <button id="btn-pca" class="secondaire">Appliquer la PCA</button>
+        <button id="btn-entrainer" class="secondaire">Entraîner la sélection</button>
+      </div>
+      <img id="image-pca" class="graphique cache" alt="Analyse PCA">
+    </div>
+
+    <div class="carte-ui" id="carte-quota">
+      <h3>📡 Quotas API Open-Meteo</h3>
+      <p class="aide">Consommation partagée par toutes les stations (liée à ton adresse IP). Le quota
+      <b>par minute</b> se recharge tout seul en ~1 min ; les autres sont indicatifs (l'API n'expose pas
+      le compteur réel). Limites <b>modifiables</b>.</p>
+      <div id="tableau-quota"></div>
+      <div class="rangee-boutons">
+        <button id="btn-quota-enregistrer" class="secondaire">Enregistrer les limites</button>
+        <button id="btn-quota-reinit" class="secondaire" title="Remet le compteur d'appels à zéro (les limites restent)">Réinitialiser le compteur</button>
+      </div>
+    </div>
+
+    <div class="carte-ui" id="carte-stockage">
+      <h3>💾 Stockage — gérer les fichiers</h3>
+      <p class="aide">Occupé sur cet appareil : <b id="stockage-total">…</b>. Supprime précisément ce dont
+      tu n'as plus besoin (un modèle lourd, le jeu de test, les fichiers de travail, ou toute une station)
+      pour libérer de la place. Le Gradient Boosting est le plus gros ; Ridge causal est minuscule.</p>
+      <div class="rangee-boutons">
+        <button id="btn-sauvegarder" class="secondaire">💾 Sauvegarder la station courante</button>
+        <button id="btn-rafraichir-stockage" class="secondaire">↻ Rafraîchir la liste</button>
+      </div>
+      <div id="inventaire-stockage"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ================= BARRE DE JOB ================= -->
+<div id="barre-job" class="cache">
+  <div class="job-entete">
+    <span id="job-titre"></span>
+    <button id="btn-arreter-job" class="danger cache">⏹️ Arrêter</button>
+    <button id="btn-plier-log" class="secondaire">Log ▾</button>
+    <button id="btn-coin-job" class="secondaire" title="Déplacer dans un autre coin">⤢</button>
+    <button id="btn-reduire-job" class="secondaire" title="Réduire / agrandir">–</button>
+  </div>
+  <div id="job-statut"></div>
+  <div id="job-progres" class="cache">
+    <div class="job-progres-entete">
+      <span id="job-progres-phase"></span>
+      <span id="job-progres-pct"></span>
+    </div>
+    <div id="job-progres-piste"><span id="job-progres-barre"></span></div>
+  </div>
+  <pre id="job-log" class="cache"></pre>
+</div>
+
+<div id="toast" class="cache"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="client_boot.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
