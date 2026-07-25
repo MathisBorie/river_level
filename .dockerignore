@@ -1,0 +1,15 @@
+# Exclut du contexte de build tout ce qui est lourd/inutile.
+.git
+__pycache__/
+*.pyc
+.DS_Store
+donnees_travail/
+cartes_html/
+webapp/data/            # 1,5 Go de données de dev — PAS livrées
+!webapp/data_public/    # ...sauf le jeu curé pour la démo
+notebooks/
+*.ipynb
+figure/
+docs/
+*.csv
+*.html

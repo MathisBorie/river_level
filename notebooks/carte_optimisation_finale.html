@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_f05cbc225f8299cde8484195fea3dc33 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_f05cbc225f8299cde8484195fea3dc33" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_f05cbc225f8299cde8484195fea3dc33 = L.map(
+                "map_f05cbc225f8299cde8484195fea3dc33",
+                {
+                    center: [44.88732, 6.09424],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 11,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_810a8710998a3a6186fc5aca3b57da66 = L.tileLayer(
+                "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+                {
+  "minZoom": 0,
+  "maxZoom": 20,
+  "maxNativeZoom": 20,
+  "noWrap": false,
+  "attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors \u0026copy; \u003ca href=\"https://carto.com/attributions\"\u003eCARTO\u003c/a\u003e",
+  "subdomains": "abcd",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_810a8710998a3a6186fc5aca3b57da66.addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var circle_marker_df41065d594411fb5ee4bc8de687ff02 = L.circleMarker(
+                [44.8646, 5.9601],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_df41065d594411fb5ee4bc8de687ff02.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_d3ad86fe9598f798a78b1d5deb68a06c = L.circleMarker(
+                [44.8704, 5.9472],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_d3ad86fe9598f798a78b1d5deb68a06c.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_76feea6c8402253e7fbc124f8b164cb6 = L.circleMarker(
+                [44.8704, 5.9988],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_76feea6c8402253e7fbc124f8b164cb6.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_67842dc4bf8405afc0224027d3797202 = L.circleMarker(
+                [44.8761, 5.9859],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_67842dc4bf8405afc0224027d3797202.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_fc64013ab8c55c604d1c577a0b36a2bf = L.circleMarker(
+                [44.8819, 5.973],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_fc64013ab8c55c604d1c577a0b36a2bf.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_f44041c8e8ae952641cec485c8c122b4 = L.circleMarker(
+                [44.8819, 6.0117],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_f44041c8e8ae952641cec485c8c122b4.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_56fe28e9c0938c5d9ed68e178dd0e2f2 = L.circleMarker(
+                [44.8877, 5.9859],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_56fe28e9c0938c5d9ed68e178dd0e2f2.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_350a6768d0b2d9ed5899a3928b3056a6 = L.circleMarker(
+                [44.8934, 5.9472],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_350a6768d0b2d9ed5899a3928b3056a6.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_a6beb0c715fe138d74732e34b02b61e3 = L.circleMarker(
+                [44.8934, 5.9988],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_a6beb0c715fe138d74732e34b02b61e3.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_70ac73f7a9168e629527989509d5530a = L.circleMarker(
+                [44.8934, 6.0376],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_70ac73f7a9168e629527989509d5530a.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_60616f517f919e87843d86365fa0de73 = L.circleMarker(
+                [44.8992, 5.9472],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_60616f517f919e87843d86365fa0de73.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_b3e3b77de1851d5dbfaf581edbdac149 = L.circleMarker(
+                [44.8992, 5.9988],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_b3e3b77de1851d5dbfaf581edbdac149.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_29cd83c1cf9cbb655f29312f5822be34 = L.circleMarker(
+                [44.8992, 6.0505],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_29cd83c1cf9cbb655f29312f5822be34.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_355a8584bca7fdf766cd0e9e4eab32c1 = L.circleMarker(
+                [44.8992, 6.0892],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_355a8584bca7fdf766cd0e9e4eab32c1.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_a06a34ef8c9a5360b170df42470888f8 = L.circleMarker(
+                [44.905, 6.0246],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_a06a34ef8c9a5360b170df42470888f8.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_eb166b040ee095b3a349e67c8fdc7e5a = L.circleMarker(
+                [44.905, 6.0763],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_eb166b040ee095b3a349e67c8fdc7e5a.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_dc9c7d4d4b9378eda54199df0d0cb729 = L.circleMarker(
+                [44.9107, 6.0246],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_dc9c7d4d4b9378eda54199df0d0cb729.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_083956a6f4e2a5af38d668ab3d898017 = L.circleMarker(
+                [44.9107, 6.0634],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_083956a6f4e2a5af38d668ab3d898017.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_8745d73fb651c815764adc7cf377fc6b = L.circleMarker(
+                [44.9165, 6.0117],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_8745d73fb651c815764adc7cf377fc6b.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_6e69446b40572cf762924ce75ee55362 = L.circleMarker(
+                [44.9165, 6.0634],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_6e69446b40572cf762924ce75ee55362.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_dec23615abab913153fc520cbf1144dd = L.circleMarker(
+                [44.9223, 6.0246],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_dec23615abab913153fc520cbf1144dd.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_b22a3cf51754c7e1aa4c8f1badc6e293 = L.circleMarker(
+                [44.9223, 6.0634],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_b22a3cf51754c7e1aa4c8f1badc6e293.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_2c49d35ef4acfb42ef9714033fc68350 = L.circleMarker(
+                [44.928, 6.0376],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_2c49d35ef4acfb42ef9714033fc68350.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_05c4445fcaa52c330147fd751e06081b = L.circleMarker(
+                [44.928, 6.0892],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_05c4445fcaa52c330147fd751e06081b.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_b66397da9b0fb7eab46c3377a9c056c6 = L.circleMarker(
+                [44.9338, 6.0763],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_b66397da9b0fb7eab46c3377a9c056c6.bindTooltip(
+                `<div>
+                     La Bonne du canal de Beaumont inclus à la Malsanne (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_0e09f80fa27d8eb62f8ad8dd6ddc2427 = L.circleMarker(
+                [44.8228, 6.0563],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_0e09f80fa27d8eb62f8ad8dd6ddc2427.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_dcdcde8a2ebbdae6ed6d6fd649867772 = L.circleMarker(
+                [44.8295, 6.0707],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_dcdcde8a2ebbdae6ed6d6fd649867772.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_9bfd99b827d5bde284d7dcb3b068c778 = L.circleMarker(
+                [44.8362, 6.0851],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_9bfd99b827d5bde284d7dcb3b068c778.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_04c185cab69fe8cc5d702731cda42d82 = L.circleMarker(
+                [44.8429, 6.0851],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_04c185cab69fe8cc5d702731cda42d82.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_0811cae0120c63607581c21088ba0b37 = L.circleMarker(
+                [44.8496, 6.0563],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_0811cae0120c63607581c21088ba0b37.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_d9f9e213310990b332483598bc5212b8 = L.circleMarker(
+                [44.8496, 6.1138],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_d9f9e213310990b332483598bc5212b8.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_ef7118d3991376134d3b1a5d16816db4 = L.circleMarker(
+                [44.8563, 6.0563],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_ef7118d3991376134d3b1a5d16816db4.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_380f925c7c34acde79a43314cb306a7e = L.circleMarker(
+                [44.8563, 6.1138],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_380f925c7c34acde79a43314cb306a7e.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_b6117e7e48082b22644e0304a5dfece7 = L.circleMarker(
+                [44.863, 6.0276],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_b6117e7e48082b22644e0304a5dfece7.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_81e6e7127b3fac733be9d1f3976f404c = L.circleMarker(
+                [44.863, 6.0851],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_81e6e7127b3fac733be9d1f3976f404c.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_54da5977b850d5b866b98c199c2066a6 = L.circleMarker(
+                [44.863, 6.1426],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_54da5977b850d5b866b98c199c2066a6.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_fa1445337eddbd45cf2ea3be7f34555f = L.circleMarker(
+                [44.8697, 6.0132],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_fa1445337eddbd45cf2ea3be7f34555f.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_63fc68c82412fa92c7d2494f1b62b4ff = L.circleMarker(
+                [44.8697, 6.0707],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_63fc68c82412fa92c7d2494f1b62b4ff.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_0ff604ce548a17df73b994a7b975004c = L.circleMarker(
+                [44.8697, 6.1138],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_0ff604ce548a17df73b994a7b975004c.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_43afd4a6220c0babe8af5bebc80de06b = L.circleMarker(
+                [44.8697, 6.1713],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_43afd4a6220c0babe8af5bebc80de06b.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_72deb8a3a26e2964187076b279ca4d75 = L.circleMarker(
+                [44.8765, 6.0419],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_72deb8a3a26e2964187076b279ca4d75.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_2d94344911522ab7c291bd974d9dc2e5 = L.circleMarker(
+                [44.8765, 6.0995],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_2d94344911522ab7c291bd974d9dc2e5.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_93b8eb57db37cc42c0b0380174762049 = L.circleMarker(
+                [44.8765, 6.157],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_93b8eb57db37cc42c0b0380174762049.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_7caeeb701f9290450fc18ce9a6625b36 = L.circleMarker(
+                [44.8832, 6.0419],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_7caeeb701f9290450fc18ce9a6625b36.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_5f8f8a1431f81e6d4811d9498975e1cd = L.circleMarker(
+                [44.8832, 6.0995],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_5f8f8a1431f81e6d4811d9498975e1cd.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_a9afb8385a9f7d580e8a5c77fb090876 = L.circleMarker(
+                [44.8832, 6.157],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_a9afb8385a9f7d580e8a5c77fb090876.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_3558832270d95998dc7d6584d1195e30 = L.circleMarker(
+                [44.8899, 6.0995],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_3558832270d95998dc7d6584d1195e30.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_67749229803043f8af2ed18b756866df = L.circleMarker(
+                [44.8899, 6.157],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_67749229803043f8af2ed18b756866df.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_d6b02de815f67cfce5482c11c08b088c = L.circleMarker(
+                [44.8966, 6.1426],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_d6b02de815f67cfce5482c11c08b088c.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_47593b1596c29f19342a2ac8727df4b2 = L.circleMarker(
+                [44.9033, 6.1426],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 1}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            circle_marker_47593b1596c29f19342a2ac8727df4b2.bindTooltip(
+                `<div>
+                     La Bonne de sa source au canal de Beaumont (Explorable)
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var marker_347967c64d2a8c1326c0599cf2937375 = L.marker(
+                [44.8496, 6.1138],
+                {
+}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var icon_f212161ebea02de7a3e5708989db9018 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "red",
+  "iconColor": "white",
+  "icon": "star",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_847d5c2daf09b8e4f61275f6fb1e9ef8 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_ceaac01ec70a5b81a4c52d961ac79fdb = $(`<div id="html_ceaac01ec70a5b81a4c52d961ac79fdb" style="width: 100.0%; height: 100.0%;"><b>La Bonne de sa source au canal de Beaumont</b><br>Lat: 44.8496<br>Lon: 6.1138</div>`)[0];
+                popup_847d5c2daf09b8e4f61275f6fb1e9ef8.setContent(html_ceaac01ec70a5b81a4c52d961ac79fdb);
+            
+        
+
+        marker_347967c64d2a8c1326c0599cf2937375.bindPopup(popup_847d5c2daf09b8e4f61275f6fb1e9ef8)
+        ;
+
+        
+    
+    
+            marker_347967c64d2a8c1326c0599cf2937375.bindTooltip(
+                `<div>
+                     🏆 Capteur Optimal - La Bonne de sa source au canal de Beaumont
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_347967c64d2a8c1326c0599cf2937375.setIcon(icon_f212161ebea02de7a3e5708989db9018);
+            
+    
+            var marker_b809efbf0f083725eac7618530c70a78 = L.marker(
+                [44.8765, 6.0995],
+                {
+}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var icon_e6a015eb38b3e85d2284c0de94dd1139 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "red",
+  "iconColor": "white",
+  "icon": "star",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_e70f6bee0e4d57e8f169a583ce77d45a = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_789db169c92b0956767f8f6bb6d72c12 = $(`<div id="html_789db169c92b0956767f8f6bb6d72c12" style="width: 100.0%; height: 100.0%;"><b>La Bonne de sa source au canal de Beaumont</b><br>Lat: 44.8765<br>Lon: 6.0995</div>`)[0];
+                popup_e70f6bee0e4d57e8f169a583ce77d45a.setContent(html_789db169c92b0956767f8f6bb6d72c12);
+            
+        
+
+        marker_b809efbf0f083725eac7618530c70a78.bindPopup(popup_e70f6bee0e4d57e8f169a583ce77d45a)
+        ;
+
+        
+    
+    
+            marker_b809efbf0f083725eac7618530c70a78.bindTooltip(
+                `<div>
+                     🏆 Capteur Optimal - La Bonne de sa source au canal de Beaumont
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_b809efbf0f083725eac7618530c70a78.setIcon(icon_e6a015eb38b3e85d2284c0de94dd1139);
+            
+    
+            var marker_a021ef5df60cdd98d878237d6482b221 = L.marker(
+                [44.9223, 6.0246],
+                {
+}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var icon_a4d726731112cdf876b629258ed47a64 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "red",
+  "iconColor": "white",
+  "icon": "star",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_5e468049d45c6ebd9f5275feb8d703c1 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_6a0bba02693a007a20857458dc2cd52e = $(`<div id="html_6a0bba02693a007a20857458dc2cd52e" style="width: 100.0%; height: 100.0%;"><b>La Bonne du canal de Beaumont inclus à la Malsanne</b><br>Lat: 44.9223<br>Lon: 6.0246</div>`)[0];
+                popup_5e468049d45c6ebd9f5275feb8d703c1.setContent(html_6a0bba02693a007a20857458dc2cd52e);
+            
+        
+
+        marker_a021ef5df60cdd98d878237d6482b221.bindPopup(popup_5e468049d45c6ebd9f5275feb8d703c1)
+        ;
+
+        
+    
+    
+            marker_a021ef5df60cdd98d878237d6482b221.bindTooltip(
+                `<div>
+                     🏆 Capteur Optimal - La Bonne du canal de Beaumont inclus à la Malsanne
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_a021ef5df60cdd98d878237d6482b221.setIcon(icon_a4d726731112cdf876b629258ed47a64);
+            
+    
+            var marker_dfab9cc8e99363bd0720bd41ff8ac8d7 = L.marker(
+                [44.905, 6.0763],
+                {
+}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var icon_8c8fbdb6b2d65a90d4c27e3c118af29e = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "red",
+  "iconColor": "white",
+  "icon": "star",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_c0d73e2732c2764e8b7ced94d071c1ba = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_df263d2590591d7f3cfb5c4bd0562bee = $(`<div id="html_df263d2590591d7f3cfb5c4bd0562bee" style="width: 100.0%; height: 100.0%;"><b>La Bonne du canal de Beaumont inclus à la Malsanne</b><br>Lat: 44.905<br>Lon: 6.0763</div>`)[0];
+                popup_c0d73e2732c2764e8b7ced94d071c1ba.setContent(html_df263d2590591d7f3cfb5c4bd0562bee);
+            
+        
+
+        marker_dfab9cc8e99363bd0720bd41ff8ac8d7.bindPopup(popup_c0d73e2732c2764e8b7ced94d071c1ba)
+        ;
+
+        
+    
+    
+            marker_dfab9cc8e99363bd0720bd41ff8ac8d7.bindTooltip(
+                `<div>
+                     🏆 Capteur Optimal - La Bonne du canal de Beaumont inclus à la Malsanne
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_dfab9cc8e99363bd0720bd41ff8ac8d7.setIcon(icon_8c8fbdb6b2d65a90d4c27e3c118af29e);
+            
+    
+            var marker_fe37f887df23f2ca2c04fcdf417f43bc = L.marker(
+                [44.8832, 6.157],
+                {
+}
+            ).addTo(map_f05cbc225f8299cde8484195fea3dc33);
+        
+    
+            var icon_751c25f6740f07a74eda965db34763e5 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "red",
+  "iconColor": "white",
+  "icon": "star",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_9f73f7302c2c70def6d55a1c522471c1 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_9f76de153456361d8959250a745f80f8 = $(`<div id="html_9f76de153456361d8959250a745f80f8" style="width: 100.0%; height: 100.0%;"><b>La Bonne de sa source au canal de Beaumont</b><br>Lat: 44.8832<br>Lon: 6.157</div>`)[0];
+                popup_9f73f7302c2c70def6d55a1c522471c1.setContent(html_9f76de153456361d8959250a745f80f8);
+            
+        
+
+        marker_fe37f887df23f2ca2c04fcdf417f43bc.bindPopup(popup_9f73f7302c2c70def6d55a1c522471c1)
+        ;
+
+        
+    
+    
+            marker_fe37f887df23f2ca2c04fcdf417f43bc.bindTooltip(
+                `<div>
+                     🏆 Capteur Optimal - La Bonne de sa source au canal de Beaumont
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_fe37f887df23f2ca2c04fcdf417f43bc.setIcon(icon_751c25f6740f07a74eda965db34763e5);
+            
+</script>
+</html>

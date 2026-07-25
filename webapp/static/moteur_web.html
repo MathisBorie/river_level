@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>River Lab — moteur 100% navigateur</title>
+<style>
+  :root { --accent:#0f9488; --accent2:#0b7269; --encre:#17212b; --e2:#5f6b78; --fond:#eef1f4; --bord:#e4e8ee; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--fond); color:var(--encre); }
+  .wrap { max-width:820px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:1.3rem; margin:0 0 4px; }
+  .sub { color:var(--e2); font-size:.9rem; margin:0 0 18px; }
+  .carte { background:#fff; border:1px solid var(--bord); border-radius:14px; padding:18px; box-shadow:0 4px 16px rgba(23,33,43,.06); margin-bottom:16px; }
+  label { font-size:.8rem; font-weight:650; color:#43505c; display:inline-flex; flex-direction:column; gap:4px; margin-right:12px; }
+  input,select { padding:8px 10px; border:1px solid #d3dae2; border-radius:8px; font-size:.9rem; background:#f7f9fb; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:9px; padding:11px 18px; font-size:.95rem; font-weight:650; cursor:pointer; }
+  button:hover:not(:disabled){ background:var(--accent2); } button:disabled{ opacity:.5; cursor:not-allowed; }
+  pre#log { background:#0c141c; color:#dbe5ee; border-radius:9px; padding:12px; font-size:.78rem; line-height:1.5; white-space:pre-wrap; max-height:200px; overflow:auto; margin:14px 0 0; }
+  .cartes-r2 { display:flex; gap:12px; flex-wrap:wrap; margin-top:14px; }
+  .r2 { flex:1 1 160px; border:1px solid var(--bord); border-radius:10px; padding:12px; text-align:center; }
+  .r2 .nom { font-size:.8rem; color:var(--e2); }
+  .r2 .val { font-size:1.7rem; font-weight:750; color:var(--accent2); }
+  .r2 .det { font-size:.72rem; color:var(--e2); }
+  .aide { color:var(--e2); font-size:.83rem; line-height:1.55; }
+  .cache { display:none; }
+  .barre { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  canvas { margin-top:12px; max-height:340px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌊 River Lab — moteur <span style="background:#e5f5f2;color:var(--accent2);border:1px solid #cbe9e4;border-radius:999px;padding:2px 10px;font-size:.75rem;font-weight:650">100 % navigateur</span></h1>
+  <p class="sub">Entraîne de vrais modèles (Ridge, Linéaire, Gradient Boosting) sur une rivière,
+  <b>entièrement sur ta machine</b> — téléchargement depuis ton IP, calcul en scikit-learn via Pyodide. Aucun serveur.</p>
+
+  <div class="carte">
+    <div class="barre">
+      <label>Code station <input id="code" value="W231401001" size="12"></label>
+      <label>Années <input id="annees" type="number" value="10" min="2" max="20" style="width:70px"></label>
+      <button id="go">▶ Entraîner cette rivière dans mon navigateur</button>
+    </div>
+    <div id="r2" class="cartes-r2"></div>
+    <pre id="log">Prêt. (Le 1er lancement télécharge Pyodide + scikit-learn, ~15 Mo, mis en cache ensuite.)</pre>
+  </div>
+
+  <div class="carte cache" id="carte-test">
+    <b>Tester sur le passé</b>
+    <p class="aide" style="margin:6px 0 10px">Compare la prévision du modèle à la réalité, à une date du jeu de test.</p>
+    <div class="barre">
+      <label>Modèle <select id="modele"></select></label>
+      <label>Date <select id="date"></select></label>
+      <label>Jours <input id="jours" type="number" value="15" min="1" max="30" style="width:70px"></label>
+      <button id="tester">Tester</button>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const logEl = document.getElementById("log");
+const log = (m) => { logEl.textContent += "\n" + m; logEl.scrollTop = logEl.scrollHeight; };
+const now = () => performance.now();
+const sec = (t) => ((now() - t) / 1000).toFixed(1) + " s";
+const NOMS = { ridge:"Ridge", lineaire:"Linéaire", gradient_boosting:"Gradient Boosting" };
+let pyodide = null, chart = null;
+
+async function initPyodide() {
+  if (pyodide) return pyodide;
+  let t = now();
+  log("Chargement de Pyodide…");
+  pyodide = await loadPyodide();
+  log("  ✔ " + sec(t));
+  t = now();
+  log("Chargement de numpy / pandas / scikit-learn…");
+  await pyodide.loadPackage(["numpy", "pandas", "scikit-learn"]);
+  log("  ✔ " + sec(t));
+  log("Chargement du moteur river_web.py…");
+  const src = await (await fetch("/static/river_web.py")).text();
+  await pyodide.runPythonAsync(src);
+  pyodide.globals.set("js_log", log);
+  log("  ✔ moteur prêt");
+  return pyodide;
+}
+
+document.getElementById("go").addEventListener("click", async () => {
+  const btn = document.getElementById("go");
+  btn.disabled = true;
+  document.getElementById("r2").innerHTML = "";
+  document.getElementById("carte-test").classList.add("cache");
+  logEl.textContent = "Démarrage…";
+  const code = document.getElementById("code").value.trim();
+  const annees = parseInt(document.getElementById("annees").value) || 10;
+  const tTot = now();
+  try {
+    await initPyodide();
+    log("Entraînement (téléchargement + modèles)…");
+    const brut = await pyodide.runPythonAsync(`
+import json
+_r = await entrainer(${JSON.stringify(code)}, annees=${annees}, log=js_log)
+json.dumps(_r)
+`);
+    const r = JSON.parse(brut);
+    log("TOTAL : " + sec(tTot) + `  (téléchargement ${r.t_dl.toFixed(1)}s · entraînement ${r.t_fit.toFixed(1)}s)`);
+
+    document.getElementById("r2").innerHTML = Object.entries(r.resultats).map(([k, v]) => {
+      const d = v.detail;
+      return `<div class="r2"><div class="nom">${NOMS[k] || k}</div>
+        <div class="val">${(v.r2 * 100).toFixed(0)} %</div>
+        <div class="det">J0 ${(d[0]*100).toFixed(0)}% → J+${d.length-1} ${(d[d.length-1]*100).toFixed(0)}%</div></div>`;
+    }).join("");
+
+    // Prépare le test sur le passé
+    const selM = document.getElementById("modele");
+    selM.innerHTML = Object.keys(r.resultats).map(k => `<option value="${k}">${NOMS[k]||k}</option>`).join("");
+    selM.value = r.resultats.gradient_boosting ? "gradient_boosting" : Object.keys(r.resultats)[0];
+    const selD = document.getElementById("date");
+    const dts = r.dates_test;
+    selD.innerHTML = dts.filter((_, i) => i % 5 === 0).map(d => `<option value="${d}">${d.split("-").reverse().join("/")}</option>`).join("");
+    selD.value = dts[Math.floor(dts.length / 2)];
+    document.getElementById("carte-test").classList.remove("cache");
+  } catch (e) {
+    log("❌ ERREUR : " + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("tester").addEventListener("click", async () => {
+  const code = document.getElementById("code").value.trim();
+  const modele = document.getElementById("modele").value;
+  const date = document.getElementById("date").value;
+  const jours = parseInt(document.getElementById("jours").value) || 15;
+  try {
+    const brut = await pyodide.runPythonAsync(`
+import json
+json.dumps(backtest(${JSON.stringify(code)}, ${JSON.stringify(modele)}, ${JSON.stringify(date)}, ${jours}))
+`);
+    const d = JSON.parse(brut);
+    if (!d) { log("date indisponible"); return; }
+    dessinerFan(d);
+  } catch (e) { log("❌ " + e.message); }
+});
+
+function dessinerFan(data) {
+  const obs = data.observe, pts = data.points;
+  const labels = obs.map(o => o.date.split("-").reverse().join("/")).concat(pts.slice(1).map(p => p.date.split("-").reverse().join("/")));
+  const base = obs.length - 1, N = labels.length, vide = n => new Array(n).fill(null);
+  const obsD = obs.map(o => o.debit).concat(vide(N - obs.length));
+  const prev = vide(N), reel = vide(N);
+  pts.forEach((p, i) => { prev[base + i] = p.prev; reel[base + i] = p.reel; });
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart").getContext("2d"), {
+    type: "line",
+    data: { labels, datasets: [
+      { label: "Passé observé", data: obsD, borderColor: "#233240", borderWidth: 2.4, pointRadius: 0, tension: .2 },
+      { label: "Prévision", data: prev, borderColor: "#0a6b62", borderWidth: 2.6, pointRadius: 2.2, tension: .2 },
+      { label: "Réel", data: reel, borderColor: "#e0533f", borderWidth: 2, borderDash: [5,3], pointRadius: 2.2, tension: .2 },
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, interaction:{mode:"index",intersect:false},
+      plugins:{ tooltip:{ callbacks:{ label:(it)=> it.parsed.y!=null ? `${it.dataset.label} : ${it.parsed.y.toFixed(2)} m³/s` : null } } },
+      scales:{ y:{ beginAtZero:true, title:{display:true,text:"Débit (m³/s)"} }, x:{ ticks:{maxTicksLimit:10,font:{size:10}} } } }
+  });
+}
+</script>
+</body>
+</html>
