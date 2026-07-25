@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>River Lab — prototype 100% navigateur (Pyodide)</title>
+<style>
+  :root { --accent:#0f9488; --accent2:#0b7269; --encre:#17212b; --fond:#eef1f4; --bord:#e4e8ee; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--fond); color:var(--encre); }
+  .wrap { max-width:760px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:1.3rem; margin:0 0 4px; }
+  .sub { color:#5f6b78; font-size:.9rem; margin:0 0 18px; }
+  .carte { background:#fff; border:1px solid var(--bord); border-radius:14px; padding:18px; box-shadow:0 4px 16px rgba(23,33,43,.06); margin-bottom:16px; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:9px; padding:12px 20px; font-size:1rem; font-weight:650; cursor:pointer; }
+  button:hover:not(:disabled){ background:var(--accent2); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  pre#log { background:#0c141c; color:#dbe5ee; border-radius:9px; padding:12px; font-size:.8rem; line-height:1.5; white-space:pre-wrap; max-height:260px; overflow:auto; margin:14px 0 0; }
+  table { border-collapse:collapse; width:100%; margin-top:12px; font-size:.9rem; }
+  td,th { border-bottom:1px solid #eef1f4; padding:7px 6px; text-align:left; }
+  th { color:#56636f; font-size:.78rem; text-transform:uppercase; letter-spacing:.4px; }
+  .grand { font-size:1.6rem; font-weight:750; color:var(--accent2); }
+  .aide { color:#5f6b78; font-size:.83rem; line-height:1.55; }
+  .pastille { display:inline-block; background:#e5f5f2; color:var(--accent2); border:1px solid #cbe9e4; border-radius:999px; padding:2px 10px; font-size:.75rem; font-weight:650; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌊 River Lab — prototype <span class="pastille">100 % navigateur</span></h1>
+  <p class="sub">Preuve de concept : tout se passe sur <b>ta machine</b>. Python (via Pyodide/WebAssembly)
+  télécharge de vraies données depuis <b>ton</b> navigateur (donc ton IP) et entraîne un modèle en direct.
+  Aucun serveur, aucun compte. Ouvre-le aussi sur ton téléphone !</p>
+
+  <div class="carte">
+    <p class="aide" style="margin-top:0">Rivière testée : <b>La Bonne</b> (W231401001), débit Hub'Eau + météo Open-Meteo
+    2021-2023, puis un <b>Ridge</b> qui prédit le débit à 7 jours. On mesure chaque étape.</p>
+    <button id="go">▶ Lancer le calcul dans mon navigateur</button>
+    <div id="resultats"></div>
+    <pre id="log">Prêt.</pre>
+  </div>
+
+  <p class="aide">Si ça marche ici (et sur ton téléphone), on peut migrer toute l'appli en client-side :
+  chacun ses ressources, son quota Open-Meteo, ses modèles — hébergé gratuitement en site statique.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const logEl = document.getElementById("log");
+const log = (m) => { logEl.textContent += "\n" + m; logEl.scrollTop = logEl.scrollHeight; };
+const chrono = () => performance.now();
+const sec = (t) => ((chrono() - t) / 1000).toFixed(1) + " s";
+
+const PYCODE = `
+import time, json
+import numpy as np, pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+from pyodide.http import pyfetch
+
+async def get_json(url):
+    r = await pyfetch(url)
+    return await r.json()
+
+def parse_dates(serie):
+    s = pd.to_datetime(serie)
+    if getattr(s.dt, "tz", None) is not None:
+        s = s.dt.tz_localize(None)
+    return s.dt.normalize()
+
+async def main():
+    CODE, LAT, LON, PAST, HOR = "W231401001", 44.90, 5.94, 7, 7
+    t0 = time.time()
+    js_log("  telechargement du debit (Hub'Eau)...")
+    d = (await get_json(f"https://hubeau.eaufrance.fr/api/v2/hydrometrie/obs_elab?code_entite={CODE}&grandeur_hydro_elab=QmnJ&date_debut_obs_elab=2021-01-01&date_fin_obs_elab=2023-12-31&size=20000&sort=asc"))["data"]
+    df_eau = pd.DataFrame(d)[["date_obs_elab","resultat_obs_elab"]]
+    df_eau.columns = ["date","debit"]
+    df_eau["date"] = parse_dates(df_eau["date"])
+    js_log("  telechargement de la meteo (Open-Meteo)...")
+    m = (await get_json(f"https://archive-api.open-meteo.com/v1/archive?latitude={LAT}&longitude={LON}&start_date=2021-01-01&end_date=2023-12-31&daily=rain_sum,temperature_2m_mean"))["daily"]
+    df_m = pd.DataFrame(m); df_m["date"] = pd.to_datetime(df_m["time"]); df_m = df_m.drop(columns=["time"])
+    t_dl = time.time() - t0
+
+    df = pd.merge(df_eau, df_m, on="date", how="inner").sort_values("date").reset_index(drop=True)
+    for i in range(1, PAST+1):
+        df[f"debit_J-{i}"] = df["debit"].shift(i)
+        df[f"rain_J-{i}"] = df["rain_sum"].shift(i)
+        df[f"temp_J-{i}"] = df["temperature_2m_mean"].shift(i)
+    for h in range(HOR+1):
+        df[f"c_J+{h}"] = df["debit"].shift(-h)
+    df = df.dropna()
+    feats = [c for c in df.columns if c.startswith(("debit_J-","rain_J-","temp_J-"))] + ["rain_sum","temperature_2m_mean"]
+    tg = [f"c_J+{h}" for h in range(HOR+1)]
+    n = len(df); s = int(n*0.8)
+    js_log("  entrainement du Ridge...")
+    tf = time.time()
+    mdl = Ridge(alpha=100).fit(df[feats].iloc[:s], df[tg].iloc[:s])
+    pred = mdl.predict(df[feats].iloc[s:])
+    t_fit = time.time() - tf
+    r2 = r2_score(df[tg].iloc[s:], pred, multioutput="raw_values")
+    r2g = float(r2_score(df[tg].iloc[s:], pred))
+    return json.dumps({"lignes":int(n), "features":len(feats), "t_dl":t_dl, "t_fit":t_fit,
+                       "r2g":r2g, "r2_j0":float(r2[0]), "r2_last":float(r2[-1])})
+
+await main()
+`;
+
+document.getElementById("go").addEventListener("click", async () => {
+  const btn = document.getElementById("go");
+  btn.disabled = true;
+  document.getElementById("resultats").innerHTML = "";
+  logEl.textContent = "Démarrage…";
+  const tTotal = chrono();
+  try {
+    let t = chrono();
+    log("Chargement de Pyodide (Python → WebAssembly)…");
+    const pyodide = await loadPyodide();
+    log("  ✔ Pyodide chargé en " + sec(t));
+
+    t = chrono();
+    log("Chargement de numpy / pandas / scikit-learn…");
+    await pyodide.loadPackage(["numpy", "pandas", "scikit-learn"]);
+    log("  ✔ paquets chargés en " + sec(t));
+
+    pyodide.globals.set("js_log", log);
+    log("Pipeline (téléchargement des données + entraînement)…");
+    const brut = await pyodide.runPythonAsync(PYCODE);
+    const r = JSON.parse(brut);
+    log("  ✔ terminé");
+    log("TOTAL : " + sec(tTotal));
+
+    const pct = (x) => (x * 100).toFixed(0) + " %";
+    document.getElementById("resultats").innerHTML =
+      `<div style="margin-top:14px"><span class="grand">R² ${pct(r.r2g)}</span>
+         <span class="aide">&nbsp;fiabilité globale (J0 ${pct(r.r2_j0)} → J+7 ${pct(r.r2_last)})</span></div>
+       <table>
+         <tr><th>Étape</th><th>Mesure</th></tr>
+         <tr><td>Lignes de données</td><td>${r.lignes} jours · ${r.features} variables</td></tr>
+         <tr><td>Téléchargement (ton IP)</td><td>${r.t_dl.toFixed(2)} s</td></tr>
+         <tr><td>Entraînement du modèle</td><td>${(r.t_fit*1000).toFixed(0)} ms</td></tr>
+       </table>
+       <p class="aide">✅ Tout ça s'est exécuté <b>dans ton navigateur</b>, sur ta machine, sans serveur.</p>`;
+  } catch (e) {
+    log("❌ ERREUR : " + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

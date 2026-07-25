@@ -468,6 +468,32 @@ class MultiGB:
 
 # ----------------------------------------------------------------- entraînement
 NOMS_MODELE = {"ridge": "Ridge", "lineaire": "Régression linéaire", "gradient_boosting": "Gradient Boosting"}
+MODELES_DISPO = ("gradient_boosting", "ridge", "lineaire")
+
+
+async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, idx=0, nb=1):
+    """Entraîne UN modèle et renvoie (objet, {r2, detail}). Le GB (1/horizon)
+    rend la main régulièrement pour que le suivi reste fluide."""
+    prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
+    if nom == "ridge":
+        m = Ridge(alpha=10000.0).fit(Xtr, Ytr)
+    elif nom == "lineaire":
+        m = LinearRegression().fit(Xtr, Ytr)
+    elif nom == "gradient_boosting":
+        ests = []; Y = Ytr.values; nh = len(targets)
+        for h in range(nh):
+            arret()
+            est = _gb(); est.fit(Xtr, Y[:, h]); ests.append(est)
+            prog("Entraînement : Gradient Boosting (1 modèle/horizon)",
+                 int((idx + (h + 1) / nh) / nb * 100), idx + 1, nb)
+            if h % 2 == 0:
+                await asyncio.sleep(0)
+        m = MultiGB(ests)
+    else:
+        return None, None
+    pred = m.predict(Xte)
+    r2 = r2_score(Yte, pred, multioutput="raw_values")
+    return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
@@ -515,33 +541,18 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
         prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
         log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
         await asyncio.sleep(0)
-        if nom == "ridge":
-            m = Ridge(alpha=10000.0).fit(Xtr, Ytr)
-        elif nom == "lineaire":
-            m = LinearRegression().fit(Xtr, Ytr)
-        elif nom == "gradient_boosting":
-            ests = []
-            Y = Ytr.values
-            nh = len(targets)
-            for h in range(nh):
-                arret()
-                est = _gb(); est.fit(Xtr, Y[:, h]); ests.append(est)
-                prog("Entraînement : Gradient Boosting (1 modèle/horizon)",
-                     int((idx + (h + 1) / nh) / nb * 100), idx + 1, nb)
-                if h % 2 == 0:
-                    await asyncio.sleep(0)   # laisse passer les requêtes de suivi
-            m = MultiGB(ests)
-        else:
+        m, sc = await _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog, arret, idx, nb)
+        if m is None:
             continue
-        pred = m.predict(Xte)
-        r2 = r2_score(Yte, pred, multioutput="raw_values")
         objets[nom] = m
-        resultats[nom] = {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
+        resultats[nom] = sc
     t_fit = time.time() - tf
     prog("Entraînement terminé", 100)
 
     test_df = df.iloc[split:].reset_index(drop=True)
     STORE[code] = {"test": test_df, "feats": feats, "targets": targets, "modeles": objets,
+                   # données gardées en mémoire pour ré-entraîner un autre modèle sans re-télécharger
+                   "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
                    "scores": resultats,
                    "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon}}
     return {"nom_station": infos["nom"], "lignes": int(n), "n_points": len(coords),
@@ -614,14 +625,54 @@ async def _run_points(jid, code, body):
         SELECTION[code] = {"points_preselectionnes": None, "altitudes_preselection": None,
                            "coords_finales": [list(p) for p in pts]}
         log(f"📍 {len(pts)} point(s) choisi(s) à la main.")
+        modele = body.get("modele") if body.get("modele") in MODELES_DISPO else "gradient_boosting"
         info = await entrainer(code, coords=pts,
                                past=int(body.get("past_day", 20)), horizon=int(body.get("predict_day", 15)),
-                               modeles=("ridge", "lineaire", "gradient_boosting"),
+                               modeles=(modele,),
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"))
-        gb = info["resultats"].get("gradient_boosting", {})
-        log(f"✅ Modèle prêt — fiabilité {gb.get('r2', 0) * 100:.0f} %")
-        job["resultat"] = {"score_gradient_boosting": gb.get("r2"), "coords_finales": [list(p) for p in pts]}
+        sc = info["resultats"].get(modele, {})
+        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} %")
+        job["resultat"] = {"score_gradient_boosting": sc.get("r2"), "coords_finales": [list(p) for p in pts]}
+        job["statut"] = "termine"
+    except _Arret:
+        log("⏹️ Arrêté à la demande."); job["statut"] = "arrete"
+    except Exception as e:
+        import traceback
+        job["erreur"] = f"{type(e).__name__}: {e}"
+        log("❌ " + traceback.format_exc()[-700:]); job["statut"] = "erreur"
+
+
+async def ajouter_modeles(code, noms, log, prog, arret):
+    """Entraîne un/des modèle(s) SUPPLÉMENTAIRE(S) sur les données déjà en mémoire
+    (aucun re-téléchargement) et les ajoute à STORE[code]."""
+    st = STORE.get(code)
+    if not st or "data" not in st:
+        raise ValueError("Analyse d'abord la rivière (données d'entraînement absentes de la mémoire).")
+    d = st["data"]; targets = st["targets"]; nb = len(noms)
+    for idx, nom in enumerate(noms):
+        arret()
+        prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
+        log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
+        await asyncio.sleep(0)
+        m, sc = await _fit_modele(nom, d["Xtr"], d["Ytr"], d["Xte"], d["Yte"], targets, prog, arret, idx, nb)
+        if m is None:
+            continue
+        st["modeles"][nom] = m; st["scores"][nom] = sc
+        log(f"   → {NOMS_MODELE.get(nom, nom)} : fiabilité {sc['r2'] * 100:.0f} %")
+    prog("Terminé", 100)
+    return {"modeles": list(st["scores"].keys())}
+
+
+async def _run_ajouter(jid, code, noms):
+    job = JOBS[jid]
+    log, prog, arret = _cbs(job)
+    try:
+        noms = [n for n in noms if n in MODELES_DISPO]
+        if not noms:
+            raise ValueError("Aucun modèle valide à entraîner.")
+        job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret)
+        log("✅ Terminé.")
         job["statut"] = "termine"
     except _Arret:
         log("⏹️ Arrêté à la demande."); job["statut"] = "arrete"
@@ -669,14 +720,15 @@ async def _run_pipeline(jid, code, body):
         SELECTION[code]["coords_finales"] = [list(c) for c in coords]
         await asyncio.sleep(0)
 
-        # 3. entraînement sur les points RETENUS
+        # 3. entraînement sur les points RETENUS (un seul modèle, GB par défaut)
+        modele = body.get("modele") if body.get("modele") in MODELES_DISPO else "gradient_boosting"
         info = await entrainer(code, coords=coords, past=past, horizon=horizon,
-                               modeles=("ridge", "lineaire", "gradient_boosting"),
+                               modeles=(modele,),
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"))
-        gb = info["resultats"].get("gradient_boosting", {})
-        log(f"✅ Modèle prêt — fiabilité {gb.get('r2', 0) * 100:.0f} %")
-        job["resultat"] = {"score_gradient_boosting": gb.get("r2"),
+        sc = info["resultats"].get(modele, {})
+        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} %")
+        job["resultat"] = {"score_gradient_boosting": sc.get("r2"),
                            "coords_finales": [list(c) for c in coords],
                            "temps_reponse_jours": diag["temps_reponse_jours"]}
         job["statut"] = "termine"
@@ -958,6 +1010,16 @@ async def _traiter(method, path, body):
     if m and method == "POST":
         jid = _job_nouveau("pipeline", m.group(1))
         asyncio.ensure_future(_run_pipeline(jid, m.group(1), body))
+        return _json.dumps({"job_id": jid})
+    m = re.match(r"^/api/riviere/([^/]+)/entrainer-modele$", p)
+    if m and method == "POST":
+        jid = _job_nouveau("entrainer", m.group(1))
+        asyncio.ensure_future(_run_ajouter(jid, m.group(1), [body.get("modele")]))
+        return _json.dumps({"job_id": jid})
+    m = re.match(r"^/api/riviere/([^/]+)/entrainer$", p)
+    if m and method == "POST":
+        jid = _job_nouveau("entrainer", m.group(1))
+        asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or []))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/jobs/(\d+)$", p)
     if m:
