@@ -31,11 +31,12 @@ VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]   # journalièr
 
 
 def _vars_meteo(temp_mode="moyenne"):
-    """Variables météo journalières selon le mode de température choisi. 'minmax'
-    ajoute min/max (natifs Open-Meteo) : capte le gel (min<0) et l'amplitude, sans
-    télécharger l'horaire."""
+    """Colonnes météo journalières (features) selon le mode de température :
+    'moyenne' = 1 colonne, 'minmax' = min/max/moyenne, 'horaire' = 24 valeurs/jour."""
     if temp_mode == "minmax":
         return ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max", "snowfall_sum"]
+    if temp_mode == "horaire":
+        return ["rain_sum", "snowfall_sum"] + [f"temp_h{h}" for h in range(24)]
     return list(VARS_METEO)
 
 # ---------------------------------------------------------------- persistance
@@ -175,27 +176,45 @@ def _cap_archive(end, forecast):
     return min(end, hier)   # comparaison lexicographique OK sur dates ISO
 
 
-async def meteo_moyenne(coords, start, end, forecast=False, vars_meteo=None):
-    """Météo journalière moyennée sur les points `coords` (1 requête batchée)."""
-    vm = vars_meteo or VARS_METEO
+async def meteo_moyenne(coords, start, end, forecast=False, temp_mode="moyenne"):
+    """Météo journalière moyennée sur les points `coords` (1 requête batchée).
+    En mode 'horaire', télécharge la température HORAIRE et la déplie en 24
+    colonnes/jour (temp_h0…temp_h23), moyennées sur les points."""
     end = _cap_archive(end, forecast)
     base = "https://api.open-meteo.com/v1/forecast" if forecast else "https://archive-api.open-meteo.com/v1/archive"
     lat = ",".join(str(c[0]) for c in coords)
     lon = ",".join(str(c[1]) for c in coords)
-    daily = ",".join(vm)
-    url = f"{base}?latitude={lat}&longitude={lon}&daily={daily}&start_date={start}&end_date={end}"
+    if temp_mode == "minmax":
+        daily_vars = ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max", "snowfall_sum"]
+    elif temp_mode == "horaire":
+        daily_vars = ["rain_sum", "snowfall_sum"]
+    else:
+        daily_vars = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]
+    url = (f"{base}?latitude={lat}&longitude={lon}&start_date={start}&end_date={end}"
+           f"&daily={','.join(daily_vars)}")
+    if temp_mode == "horaire":
+        url += "&hourly=temperature_2m"
     data = await _fetch_json(url)
     points = data if isinstance(data, list) else [data]
-    dfs = []
+
+    dailies, hourlies = [], []
     for p in points:
-        if "daily" not in p:
-            continue
-        dp = pd.DataFrame(p["daily"])
-        dp["date"] = pd.to_datetime(dp["time"]).dt.normalize()
-        dfs.append(dp.drop(columns=["time"]))
-    if not dfs:
-        return pd.DataFrame(columns=["date"] + list(vm))
-    return pd.concat(dfs).groupby("date", as_index=False).mean()
+        if "daily" in p:
+            dp = pd.DataFrame(p["daily"]); dp["date"] = pd.to_datetime(dp["time"]).dt.normalize()
+            dailies.append(dp.drop(columns=["time"]))
+        if "hourly" in p:
+            hp = pd.DataFrame(p["hourly"]); hp["dt"] = pd.to_datetime(hp["time"])
+            hourlies.append(hp.drop(columns=["time"]))
+    if not dailies:
+        return pd.DataFrame(columns=["date"] + _vars_meteo(temp_mode))
+    df = pd.concat(dailies).groupby("date", as_index=False).mean()
+    if temp_mode == "horaire" and hourlies:
+        hp = pd.concat(hourlies)
+        hp["date"] = hp["dt"].dt.normalize(); hp["h"] = hp["dt"].dt.hour
+        piv = hp.groupby(["date", "h"])["temperature_2m"].mean().unstack("h")
+        piv.columns = [f"temp_h{int(h)}" for h in piv.columns]
+        df = pd.merge(df, piv.reset_index(), on="date", how="left")
+    return df
 
 
 # ----------------------------------------------------------------- géométrie
@@ -703,7 +722,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     vm = _vars_meteo(temp_mode)
     arret()
     prog("Téléchargement de la météo", None); log(f"Téléchargement de la météo sur {len(coords)} points…")
-    df_meteo = await meteo_moyenne(coords, s, e, vars_meteo=vm)
+    df_meteo = await meteo_moyenne(coords, s, e, temp_mode=temp_mode)
     t_dl = time.time() - t0
     await asyncio.sleep(0)
 
@@ -990,6 +1009,7 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
     feats, meta = st["feats"], st["meta"]
     coords, past, horizon = meta["coords"], meta["past"], meta["horizon"]
     vm = meta.get("vars_meteo", VARS_METEO)
+    temp_mode = meta.get("temp_mode", "moyenne")
     today = pd.Timestamp.now().normalize()
     start = (today - pd.Timedelta(days=past + 7)).strftime("%Y-%m-%d")
 
@@ -1012,7 +1032,7 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
     for cap in (15, 13, 11, 9, 7):
         end = (today + pd.Timedelta(days=cap)).strftime("%Y-%m-%d")
         try:
-            df_meteo = await meteo_moyenne(coords, start, end, forecast=True, vars_meteo=vm)
+            df_meteo = await meteo_moyenne(coords, start, end, forecast=True, temp_mode=temp_mode)
             if df_meteo is not None and not df_meteo.empty:
                 break
         except Exception:
