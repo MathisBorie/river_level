@@ -627,9 +627,33 @@ def _sigmas_ligne(regs, X, horizons):
     return {h: float(np.sqrt(max(1e-9, regs[h].predict(X)[0]))) for h in horizons}
 
 
+def _decouper(df, feats, targets, mode_split, part_test):
+    """Découpe train/test : soit des ANNÉES entières tirées au sort (évite qu'une
+    saison entière du test ressemble trop au train), soit la période la plus
+    récente (chronologique). Renvoie Xtr, Xte, Ytr, Yte, test_df."""
+    part_test = min(0.5, max(0.05, float(part_test)))
+    n = len(df)
+    if mode_split == "chronologique":
+        split = int(n * (1 - part_test))
+        masque = np.zeros(n, dtype=bool); masque[split:] = True
+    else:  # annees_aleatoires
+        annees = df["date"].dt.year.values
+        uniques = np.array(sorted(set(annees)))
+        rng = np.random.default_rng(42)
+        n_test = max(1, min(len(uniques) - 1, round(len(uniques) * part_test)))
+        annees_test = set(rng.choice(uniques, size=n_test, replace=False))
+        masque = np.array([a in annees_test for a in annees])
+        if masque.all() or not masque.any():   # garde-fou
+            split = int(n * (1 - part_test)); masque = np.zeros(n, dtype=bool); masque[split:] = True
+    Xtr, Xte = df[feats][~masque], df[feats][masque]
+    Ytr, Yte = df[targets][~masque], df[targets][masque]
+    return Xtr, Xte, Ytr, Yte, df[masque].reset_index(drop=True)
+
+
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
-                    log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99):
+                    log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99,
+                    mode_split="annees_aleatoires", part_test=0.2):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
     arret = arret or (lambda: None)
@@ -657,11 +681,11 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
 
     prog("Préparation des données", None); log("Construction des variables explicatives…")
     df, feats, targets = construire(df_eau, df_meteo, past, horizon)
-    n = len(df); split = int(n * 0.8)
+    n = len(df)
     if n < 50:
         raise ValueError(f"Trop peu de données exploitables ({n} lignes) sur cette période.")
-    Xtr, Xte = df[feats].iloc[:split], df[feats].iloc[split:]
-    Ytr, Yte = df[targets].iloc[:split], df[targets].iloc[split:]
+    Xtr, Xte, Ytr, Yte, test_df = _decouper(df, feats, targets, mode_split, part_test)
+    log(f"Découpage {mode_split} : {len(Xtr)} jours d'entraînement, {len(Xte)} de test.")
     await asyncio.sleep(0)
 
     resultats, objets, variances = {}, {}, {}
@@ -682,7 +706,6 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     t_fit = time.time() - tf
     prog("Entraînement terminé", 100)
 
-    test_df = df.iloc[split:].reset_index(drop=True)
     STORE[code] = {"test": test_df, "feats": feats, "targets": targets, "modeles": objets,
                    # données gardées en mémoire pour ré-entraîner un autre modèle sans re-télécharger
                    "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
@@ -765,7 +788,9 @@ async def _run_points(jid, code, body):
                                modeles=(modele,),
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"),
-                               seuil_pca=float(body.get("seuil_energie") or 99))
+                               seuil_pca=float(body.get("seuil_energie") or 99),
+                               mode_split=body.get("mode_split", "annees_aleatoires"),
+                               part_test=float(body.get("part_test") or 0.2))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé)")
@@ -864,7 +889,9 @@ async def _run_pipeline(jid, code, body):
                                modeles=(modele,),
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"),
-                               seuil_pca=float(body.get("seuil_energie") or 99))
+                               seuil_pca=float(body.get("seuil_energie") or 99),
+                               mode_split=body.get("mode_split", "annees_aleatoires"),
+                               part_test=float(body.get("part_test") or 0.2))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé sur cet appareil)")
