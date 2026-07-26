@@ -56,11 +56,20 @@ def besoin_sync():
     return v
 
 
+def _store_leger(st):
+    """Store SANS les données d'entraînement brutes (Xtr/Ytr…) : elles pèsent
+    plusieurs Mo et provoquaient des plantages mémoire au moment de sauvegarder
+    sur téléphone. Prévision / backtest / partage n'en ont pas besoin (le backtest
+    retélécharge à la demande si nécessaire). Elles restent en RAM pour la session
+    (pour ré-entraîner un autre modèle sans re-télécharger)."""
+    return {k: v for k, v in st.items() if k != "data"} if st else None
+
+
 def _sauver(code):
     """Écrit modèles + zones + sélection d'une station sur le disque du navigateur."""
     try:
         os.makedirs(_PERSIST, exist_ok=True)
-        paquet = {"store": STORE.get(code), "zones": ZONES.get(code), "selection": SELECTION.get(code)}
+        paquet = {"store": _store_leger(STORE.get(code)), "zones": ZONES.get(code), "selection": SELECTION.get(code)}
         joblib.dump(paquet, f"{_PERSIST}/{code}.joblib", compress=3)
         _A_SYNCHRONISER[0] = True
     except Exception as e:
@@ -110,7 +119,7 @@ def exporter(code):
     quelqu'un d'autre."""
     if code not in STORE:
         return {"erreur": "Aucun modèle à exporter pour cette station."}
-    paquet = {"format": "riverlab-1", "code": code, "store": STORE.get(code),
+    paquet = {"format": "riverlab-1", "code": code, "store": _store_leger(STORE.get(code)),
               "zones": ZONES.get(code), "selection": SELECTION.get(code)}
     buf = io.BytesIO()
     joblib.dump(paquet, buf, compress=3)
@@ -716,10 +725,13 @@ def _reg_variance(X, r, cote):
     masque = (r >= 0) if cote == "up" else (r < 0)
     if masque.sum() < 50:
         masque = np.ones(len(r), dtype=bool)
-    reg = HistGradientBoostingRegressor(max_iter=120, max_depth=4, learning_rate=0.06,
-                                        min_samples_leaf=25, l2_regularization=1.0,
-                                        early_stopping=True, validation_fraction=0.1,
-                                        n_iter_no_change=12, random_state=42)
+    # modèle de variance volontairement LÉGER (max_leaf_nodes/max_iter réduits) :
+    # divise par ~3 la mémoire et la taille sauvegardée (crashes mobiles), sans
+    # nuire sensiblement à la calibration des intervalles.
+    reg = HistGradientBoostingRegressor(max_iter=70, max_depth=3, max_leaf_nodes=15,
+                                        learning_rate=0.08, min_samples_leaf=40,
+                                        l2_regularization=2.0, early_stopping=True,
+                                        validation_fraction=0.1, n_iter_no_change=8, random_state=42)
     reg.fit(X[masque], r[masque] ** 2)
     return reg
 
@@ -940,7 +952,8 @@ async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99):
     (aucun re-téléchargement) et les ajoute à STORE[code]."""
     st = STORE.get(code)
     if not st or "data" not in st:
-        raise ValueError("Analyse d'abord la rivière (données d'entraînement absentes de la mémoire).")
+        raise ValueError("Les données d'entraînement ne sont plus en mémoire (modèle rechargé ou importé). "
+                         "Ré-analyse la rivière pour entraîner d'autres modèles.")
     d = st["data"]; targets = st["targets"]; nb = len(noms)
     for idx, nom in enumerate(noms):
         arret()
