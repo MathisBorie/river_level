@@ -1023,6 +1023,9 @@ async function preparerBacktest() {
     champ.max = d.max;
     if (!champ.value) champ.value = d.dates[Math.floor(d.dates.length / 2)];
     etat.datesTest = d.dates;
+    etat.anneesTest = d.annees_test || [];
+    $("backtest-annees").textContent = etat.anneesTest.length
+      ? `années de test : ${etat.anneesTest.join(", ")}` : "";
   } catch (e) {
     $("btn-backtest").disabled = true;
   }
@@ -1030,19 +1033,14 @@ async function preparerBacktest() {
 
 $("btn-backtest").addEventListener("click", async () => {
   const modele = $("backtest-modele").value;
-  let date = $("backtest-date").value;
-  if (etat.datesTest && !etat.datesTest.includes(date)) {
-    // choisit la date de test disponible la plus proche
-    const cible = new Date(date).getTime();
-    date = etat.datesTest.reduce((a, b) =>
-      Math.abs(new Date(a) - cible) < Math.abs(new Date(b) - cible) ? a : b
-    );
-    $("backtest-date").value = date;
-    toast(`Date ajustée à la plus proche disponible : ${dateFr(date)}`);
-  }
+  const date = $("backtest-date").value;
+  if (!date) return toast("Choisis une date de test.", true);
   const hybride = $("backtest-hybride").checked ? 1 : 0;
   const nbJours = parseInt($("backtest-jours").value) || 15;
+  // Si la date n'est pas déjà dans le jeu stocké, le moteur télécharge la fenêtre.
+  const stockee = etat.datesTest && etat.datesTest.includes(date);
   $("btn-backtest").disabled = true;
+  $("btn-backtest").textContent = stockee ? "Test…" : "Téléchargement…";
   try {
     const res = await api(`/api/riviere/${etat.code}/backtest?modele=${modele}&date=${date}&hybride=${hybride}&nb_jours=${nbJours}`);
     rendreFanChart("chart-backtest", res, true);
@@ -1061,6 +1059,7 @@ $("btn-backtest").addEventListener("click", async () => {
     toast(e.message, true);
   } finally {
     $("btn-backtest").disabled = false;
+    $("btn-backtest").textContent = "Tester";
   }
 });
 
@@ -1211,9 +1210,24 @@ $("fichier-modele").addEventListener("change", async (ev) => {
   ev.target.value = "";  // permet de ré-importer le même fichier
   try {
     const b64 = _bufferVersB64(await file.arrayBuffer());
-    const res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64 }) });
+    let res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64 }) });
+    if (res.conflit) {
+      const infos = (x) => `${x.modeles.join(", ")} — R² <b>${x.r2}%</b>, prévoit <b>${x.horizon} j</b>`;
+      const html =
+        `<p>Un modèle existe déjà pour <b>${res.nom}</b>. Que faire ?</p>` +
+        `<ul class="liste-choix"><li>📍 Actuel : ${infos(res.actuel)}</li>` +
+        `<li>📥 Importé : ${infos(res.importe)}</li></ul>`;
+      const mode = await demanderChoix("Modèle déjà présent", html, [
+        { label: "Garder le meilleur", valeur: "meilleur", classe: "primaire" },
+        { label: "Garder les deux", valeur: "fusionner" },
+        { label: "Remplacer", valeur: "remplacer" },
+        { label: "Annuler", valeur: null },
+      ]);
+      if (!mode) return;
+      res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64, mode }) });
+    }
     if (res.erreur) throw new Error(res.erreur);
-    toast(`Importé : ${res.nom} — modèles : ${res.modeles.join(", ")}.`);
+    toast(`Importé : ${res.nom} — ${res.modeles.join(", ")} (R² ${res.r2}%, ${res.horizon} j).`);
     await rendreInventaireStockage();
     if (res.code) {
       $("drawer-reglages").classList.add("cache");
@@ -1224,6 +1238,27 @@ $("fichier-modele").addEventListener("change", async (ev) => {
     toast("Import impossible : " + e.message, true);
   }
 });
+
+// Petite fenêtre de choix (renvoie la valeur du bouton cliqué, ou null).
+function demanderChoix(titre, html, boutons) {
+  return new Promise((resolve) => {
+    const fond = document.createElement("div");
+    fond.className = "modal-fond";
+    fond.innerHTML =
+      `<div class="modal-boite"><h3>${titre}</h3><div class="modal-corps">${html}</div>` +
+      `<div class="modal-actions"></div></div>`;
+    const actions = fond.querySelector(".modal-actions");
+    boutons.forEach((b) => {
+      const btn = document.createElement("button");
+      btn.textContent = b.label;
+      btn.className = b.classe || "secondaire";
+      btn.addEventListener("click", () => { fond.remove(); resolve(b.valeur); });
+      actions.appendChild(btn);
+    });
+    fond.addEventListener("click", (e) => { if (e.target === fond) { fond.remove(); resolve(null); } });
+    document.body.appendChild(fond);
+  });
+}
 
 async function supprimerStockage(code, cible) {
   const nom = cible === "station" ? "TOUTE la station " + code

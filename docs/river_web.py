@@ -120,9 +120,22 @@ def exporter(code):
             "b64": base64.b64encode(octets).decode("ascii")}
 
 
-def importer(b64):
-    """Charge un fichier .riverlab (base64) reçu d'un autre utilisateur et l'ajoute
-    aux modèles de cet appareil (sauvegardé automatiquement)."""
+def _r2_max(store):
+    return max((s["r2"] for s in store.get("scores", {}).values()), default=0.0)
+
+
+def _resume_modele(store):
+    """Infos lisibles d'un modèle : liste, meilleur R², horizon, années de test."""
+    return {"modeles": [NOMS_MODELE.get(n, n) for n in store.get("scores", {})],
+            "r2": round(_r2_max(store) * 100),
+            "horizon": store["meta"]["horizon"],
+            "annees_test": store["meta"].get("annees_test", [])}
+
+
+def importer(b64, mode="demander"):
+    """Charge un fichier .riverlab reçu d'un autre utilisateur. Si un modèle existe
+    déjà pour cette station, renvoie un 'conflit' pour laisser choisir : remplacer,
+    garder le meilleur (R²), ou garder les deux (fusion des modèles compatibles)."""
     try:
         paquet = joblib.load(io.BytesIO(base64.b64decode(b64)))
     except Exception as e:
@@ -130,16 +143,44 @@ def importer(b64):
     if not isinstance(paquet, dict) or paquet.get("format") != "riverlab-1" or "code" not in paquet:
         return {"erreur": "Ce fichier n'est pas un modèle River Lab."}
     code = paquet["code"]
-    if paquet.get("store"):
-        STORE[code] = paquet["store"]
-    if paquet.get("zones"):
-        ZONES[code] = paquet["zones"]
-    if paquet.get("selection"):
-        SELECTION[code] = paquet["selection"]
+    nouveau = paquet.get("store")
+    if not nouveau:
+        return {"erreur": "Fichier sans modèle."}
+    existant = STORE.get(code)
+
+    if existant and mode == "demander":
+        return {"conflit": True, "code": code, "nom": nouveau["meta"].get("nom", code),
+                "actuel": _resume_modele(existant), "importe": _resume_modele(nouveau)}
+
+    def poser_importe():
+        STORE[code] = nouveau
+        if paquet.get("zones"): ZONES[code] = paquet["zones"]
+        if paquet.get("selection"): SELECTION[code] = paquet["selection"]
+
+    if not existant or mode == "remplacer":
+        poser_importe()
+    elif mode == "meilleur":
+        if _r2_max(nouveau) >= _r2_max(existant):
+            poser_importe()
+        # sinon on garde l'existant tel quel
+    elif mode == "fusionner":
+        # base = l'importé ; on y ajoute les modèles de l'existant s'ils sont compatibles
+        if existant.get("feats") == nouveau.get("feats"):
+            for nom in existant.get("modeles", {}):
+                if nom not in nouveau["modeles"]:
+                    nouveau["modeles"][nom] = existant["modeles"][nom]
+                    nouveau["scores"][nom] = existant["scores"][nom]
+                    if nom in existant.get("variance", {}):
+                        nouveau.setdefault("variance", {})[nom] = existant["variance"][nom]
+        poser_importe()
+    else:
+        poser_importe()
+
     _sauver(code)
-    nom = STORE[code]["meta"].get("nom", code) if code in STORE else code
-    modeles = [NOMS_MODELE.get(n, n) for n in STORE[code]["scores"].keys()] if code in STORE else []
-    return {"code": code, "nom": nom, "modeles": modeles}
+    st = STORE.get(code, existant)
+    return {"code": code, "nom": st["meta"].get("nom", code),
+            "modeles": [NOMS_MODELE.get(n, n) for n in st["scores"].keys()],
+            "r2": round(_r2_max(st) * 100), "horizon": st["meta"]["horizon"]}
 
 
 def _supprimer(code, cible):
@@ -798,7 +839,8 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                    "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
                    "scores": resultats, "variance": variances,
                    "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon,
-                            "vars_meteo": vm, "temp_mode": temp_mode}}
+                            "vars_meteo": vm, "temp_mode": temp_mode,
+                            "annees_test": sorted({int(y) for y in test_df["date"].dt.year.unique()})}}
     return {"nom_station": infos["nom"], "lignes": int(n), "n_points": len(coords),
             "resultats": resultats, "t_dl": t_dl, "t_fit": t_fit, "total": time.time() - t0,
             "dates_test": [d.strftime("%Y-%m-%d") for d in test_df["date"]]}
@@ -999,23 +1041,49 @@ async def _run_pipeline(jid, code, body):
         job["statut"] = "erreur"
 
 
-def backtest(code, modele, date_str, nb_jours=None, hybride=True):
-    """Données du fan chart (prévision vs réalité) pour une date du jeu de test."""
+async def _fenetre_test(code, date, meta):
+    """Télécharge juste ce qu'il faut pour tester à `date` (débit + météo sur
+    ~[date-past-20 j, date+horizon+3 j]) et construit la ligne de features."""
+    past, horizon, coords = meta["past"], meta["horizon"], meta["coords"]
+    vm = meta.get("vars_meteo", VARS_METEO); temp_mode = meta.get("temp_mode", "moyenne")
+    s = (date - pd.Timedelta(days=past + 20)).strftime("%Y-%m-%d")
+    e = (date + pd.Timedelta(days=horizon + 3)).strftime("%Y-%m-%d")
+    df_eau = await debit(code, s, e)
+    df_meteo = await meteo_moyenne(coords, s, e, temp_mode=temp_mode)
+    df, _, _ = construire(df_eau, df_meteo, past, horizon, vars_meteo=vm)
+    return df
+
+
+async def backtest(code, modele, date_str, nb_jours=None, hybride=True):
+    """Fan chart (prévision vs réalité) pour une date du jeu de TEST. Vérifie que la
+    date est bien une date de test (sinon renvoie les années de test), et si la ligne
+    n'est pas déjà en mémoire, télécharge à la demande la petite fenêtre nécessaire."""
     st = STORE.get(code)
     if not st or modele not in st["modeles"]:
         return None
-    test, feats, targets, meta = st["test"], st["feats"], st["targets"], st["meta"]
+    feats, targets, meta = st["feats"], st["targets"], st["meta"]
     horizon = meta["horizon"]
     h_max = horizon if nb_jours is None else max(1, min(int(nb_jours), horizon))
     date = pd.to_datetime(date_str)
-    ligne = test[test["date"] == date]
-    if ligne.empty:
-        return None
+    test = st.get("test")
+    annees_test = meta.get("annees_test") or (sorted({int(y) for y in test["date"].dt.year.unique()}) if test is not None else [])
+    if annees_test and date.year not in annees_test:
+        return {"erreur": f"Le {date.strftime('%d/%m/%Y')} ne fait pas partie du jeu de test. "
+                          f"Années de test : {', '.join(map(str, annees_test))}.",
+                "annees_test": annees_test}
+    # ligne déjà calculée ? sinon on télécharge la fenêtre concernée
+    ligne = test[test["date"] == date] if test is not None else None
+    contexte_df = test
+    if ligne is None or ligne.empty:
+        contexte_df = await _fenetre_test(code, date, meta)
+        ligne = contexte_df[contexte_df["date"] == date]
+        if ligne.empty:
+            return {"erreur": "Données indisponibles pour cette date (débit ou météo manquants)."}
     X = ligne[feats]
     pred = st["modeles"][modele].predict(X)[0][:h_max + 1]
     vrai = ligne[[f"cible_J+{h}" for h in range(h_max + 1)]].values[0]
     debit0 = ligne["debit_L_s"].values[0]
-    contexte = test[(test["date"] >= date - pd.Timedelta(days=15)) & (test["date"] <= date)]
+    contexte = contexte_df[(contexte_df["date"] >= date - pd.Timedelta(days=15)) & (contexte_df["date"] <= date)]
     D = 1000.0
     dates = [date] + list(pd.date_range(date + pd.Timedelta(days=1), periods=h_max + 1))
     pts = [{"date": d.strftime("%Y-%m-%d"),
@@ -1236,8 +1304,9 @@ def dates_test(code):
     st = STORE.get(code)
     if not st:
         return {"erreur": "Pas de jeu de test (entraîne d'abord)."}
-    dts = [d.strftime("%Y-%m-%d") for d in st["test"]["date"]]
-    return {"min": dts[0], "max": dts[-1], "dates": dts}
+    dts = sorted(d.strftime("%Y-%m-%d") for d in st["test"]["date"])
+    annees = st["meta"].get("annees_test") or sorted({int(y) for y in st["test"]["date"].dt.year.unique()})
+    return {"min": dts[0], "max": dts[-1], "dates": dts, "annees_test": annees}
 
 
 def quota_zero():
@@ -1279,7 +1348,7 @@ async def _traiter(method, path, body):
     if p == "/api/stockage/supprimer" and method == "POST":
         return _json.dumps(_supprimer(body.get("code"), body.get("cible", "station")))
     if p == "/api/importer" and method == "POST":
-        return _json.dumps(importer(body.get("b64", "")))
+        return _json.dumps(importer(body.get("b64", ""), body.get("mode", "demander")))
     m = re.match(r"^/api/riviere/([^/]+)/exporter$", p)
     if m:
         return _json.dumps(exporter(m.group(1)))
@@ -1306,10 +1375,10 @@ async def _traiter(method, path, body):
         return _json.dumps(pca_analyse(m.group(1), float(g1("seuil") or 99)))
     m = re.match(r"^/api/riviere/([^/]+)/backtest$", p)
     if m:
-        r = backtest(m.group(1), g1("modele", "gradient_boosting"), g1("date"), int(g1("nb_jours") or 15),
-                     hybride=g1("hybride", "1") != "0")
+        r = await backtest(m.group(1), g1("modele", "gradient_boosting"), g1("date"), int(g1("nb_jours") or 15),
+                           hybride=g1("hybride", "1") != "0")
         st = STORE.get(m.group(1))
-        if r and st:
+        if r and st and "points" in r:
             sc = st["scores"].get(g1("modele", "gradient_boosting"), {})
             r["modele"] = g1("modele", "gradient_boosting"); r["score"] = sc.get("r2"); r["scores_detail"] = sc.get("detail"); r["unite"] = "m³/s"
         return _json.dumps(r) if r else _json.dumps({"erreur": "date indisponible ou modèle non entraîné"})
