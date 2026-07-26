@@ -107,6 +107,7 @@ def _supprimer(code, cible):
         libere = octets // max(1, len(st.get("scores", {}))) if st else 0
         if st and nom in st.get("modeles", {}):
             st["modeles"].pop(nom, None); st["scores"].pop(nom, None)
+            st.get("variance", {}).pop(nom, None)
             if st["modeles"]:
                 _sauver(code)
             else:  # plus aucun modèle : on retire la station
@@ -597,6 +598,35 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
     return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
+async def _fit_variance(base, Xtr, Ytr, targets, prog=None, arret=None):
+    """Incertitude, version sklearn (= entrainer_incertitude2 côté serveur) : un
+    régresseur par horizon estime E[résidu²|X] -> écart-type. Aucun TensorFlow."""
+    prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
+    resid = Ytr.values - base.predict(Xtr)
+    nh = len(targets); regs = []
+    for i in range(nh):
+        arret()
+        reg = HistGradientBoostingRegressor(max_iter=120, max_depth=4, learning_rate=0.06,
+                                            min_samples_leaf=25, l2_regularization=1.0,
+                                            early_stopping=True, validation_fraction=0.1,
+                                            n_iter_no_change=12, random_state=42)
+        reg.fit(Xtr, resid[:, i] ** 2)
+        regs.append(reg)
+        prog("Estimation de l'incertitude", int((i + 1) / nh * 100), i + 1, nh)
+        if i % 2 == 0:
+            await asyncio.sleep(0)
+    return regs
+
+
+# z-scores des niveaux d'intervalle de confiance
+_IC_NIVEAUX = (("50", 0.674), ("95", 1.960), ("99", 2.576))
+
+
+def _sigmas_ligne(regs, X, horizons):
+    """Écart-type prédit (racine de la variance) pour une seule ligne X, par horizon."""
+    return {h: float(np.sqrt(max(1e-9, regs[h].predict(X)[0]))) for h in horizons}
+
+
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
                     log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99):
@@ -634,7 +664,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     Ytr, Yte = df[targets].iloc[:split], df[targets].iloc[split:]
     await asyncio.sleep(0)
 
-    resultats, objets = {}, {}
+    resultats, objets, variances = {}, {}, {}
     tf = time.time()
     nb = len(modeles)
     for idx, nom in enumerate(modeles):
@@ -647,6 +677,8 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
             continue
         objets[nom] = m
         resultats[nom] = sc
+        log("Estimation des intervalles de confiance…")
+        variances[nom] = await _fit_variance(m, Xtr, Ytr, targets, prog, arret)
     t_fit = time.time() - tf
     prog("Entraînement terminé", 100)
 
@@ -654,7 +686,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     STORE[code] = {"test": test_df, "feats": feats, "targets": targets, "modeles": objets,
                    # données gardées en mémoire pour ré-entraîner un autre modèle sans re-télécharger
                    "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
-                   "scores": resultats,
+                   "scores": resultats, "variance": variances,
                    "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon}}
     return {"nom_station": infos["nom"], "lignes": int(n), "n_points": len(coords),
             "resultats": resultats, "t_dl": t_dl, "t_fit": t_fit, "total": time.time() - t0,
@@ -763,6 +795,7 @@ async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99):
         if m is None:
             continue
         st["modeles"][nom] = m; st["scores"][nom] = sc
+        st.setdefault("variance", {})[nom] = await _fit_variance(m, d["Xtr"], d["Ytr"], targets, prog, arret)
         log(f"   → {NOMS_MODELE.get(nom, nom)} : fiabilité {sc['r2'] * 100:.0f} %")
     prog("Terminé", 100)
     return {"modeles": list(st["scores"].keys())}
@@ -849,7 +882,7 @@ async def _run_pipeline(jid, code, body):
         job["statut"] = "erreur"
 
 
-def backtest(code, modele, date_str, nb_jours=None):
+def backtest(code, modele, date_str, nb_jours=None, hybride=True):
     """Données du fan chart (prévision vs réalité) pour une date du jeu de test."""
     st = STORE.get(code)
     if not st or modele not in st["modeles"]:
@@ -871,13 +904,25 @@ def backtest(code, modele, date_str, nb_jours=None):
     pts = [{"date": d.strftime("%Y-%m-%d"),
             "prev": float(v) / D, "reel": float(r) / D}
            for d, v, r in zip(dates, [debit0] + list(pred), [debit0] + list(vrai))]
-    return {"pivot": date.strftime("%Y-%m-%d"), "hybride": False,
+    # intervalles de confiance (si l'incertitude a été apprise pour ce modèle)
+    regs = st.get("variance", {}).get(modele) if hybride else None
+    hybride = False
+    if regs:
+        hybride = True
+        sig = _sigmas_ligne(regs, X, range(h_max + 1))
+        for niv, z in _IC_NIVEAUX:
+            bas = [debit0] + [max(0.0, pred[h] - z * sig[h]) for h in range(h_max + 1)]
+            haut = [debit0] + [pred[h] + z * sig[h] for h in range(h_max + 1)]
+            for k, p in enumerate(pts):
+                p[f"ic{niv}_bas"] = float(bas[k]) / D
+                p[f"ic{niv}_haut"] = float(haut[k]) / D
+    return {"pivot": date.strftime("%Y-%m-%d"), "hybride": hybride,
             "observe": [{"date": d.strftime("%Y-%m-%d"), "debit": float(x) / D}
                         for d, x in zip(contexte["date"], contexte["debit_L_s"])],
             "points": pts}
 
 
-async def prevision(code, modele, nb_jours=None):
+async def prevision(code, modele, nb_jours=None, hybride=True):
     """Prévision réelle à partir d'AUJOURD'HUI : débit récent (Hub'Eau) + météo
     PRÉVISIONNELLE (Open-Meteo forecast) sur les points retenus, puis prédiction
     des prochains jours. Renvoie un fan chart (pivot = aujourd'hui)."""
@@ -942,8 +987,20 @@ async def prevision(code, modele, nb_jours=None):
     for h in horizons:
         d = date_J0 + pd.Timedelta(days=h)
         points.append({"date": d.strftime("%Y-%m-%d"), "prev": float(pred[h]) / D})
+    # intervalles de confiance (si l'incertitude a été apprise pour ce modèle)
+    regs = st.get("variance", {}).get(modele) if hybride else None
+    hybride = False
+    if regs:
+        hybride = True
+        sig = _sigmas_ligne(regs, X, horizons)
+        for niv, z in _IC_NIVEAUX:
+            points[0][f"ic{niv}_bas"] = debit0 / D
+            points[0][f"ic{niv}_haut"] = debit0 / D
+            for k, h in enumerate(horizons, start=1):
+                points[k][f"ic{niv}_bas"] = max(0.0, pred[h] - z * sig[h]) / D
+                points[k][f"ic{niv}_haut"] = (pred[h] + z * sig[h]) / D
     sc = st["scores"].get(modele, {})
-    return {"pivot": today.strftime("%Y-%m-%d"), "hybride": False,
+    return {"pivot": today.strftime("%Y-%m-%d"), "hybride": hybride,
             "observe": observe, "points": points, "modele": modele,
             "score": sc.get("r2"), "scores_detail": sc.get("detail"), "unite": "m³/s"}
 
@@ -1007,8 +1064,9 @@ async def etat(code):
     sel = SELECTION.get(code)
     modeles = []
     if st:
+        variance = st.get("variance", {})
         for nom, r in st.get("scores", {}).items():
-            modeles.append({"nom": nom, "score": r["r2"], "espace": "brut", "hybride": False})
+            modeles.append({"nom": nom, "score": r["r2"], "espace": "brut", "hybride": nom in variance})
     # points finaux : la sélection auto/manuelle si elle existe, sinon ceux de l'entraînement
     coords_finales = None
     if sel and sel.get("coords_finales"):
@@ -1116,13 +1174,15 @@ async def _traiter(method, path, body):
     m = re.match(r"^/api/riviere/([^/]+)/prevision$", p)
     if m:
         return _json.dumps(await prevision(m.group(1), g1("modele", "gradient_boosting"),
-                                           int(g1("nb_jours")) if g1("nb_jours") else None))
+                                           int(g1("nb_jours")) if g1("nb_jours") else None,
+                                           hybride=g1("hybride", "1") != "0"))
     m = re.match(r"^/api/riviere/([^/]+)/pca$", p)
     if m:
         return _json.dumps(pca_analyse(m.group(1), float(g1("seuil") or 99)))
     m = re.match(r"^/api/riviere/([^/]+)/backtest$", p)
     if m:
-        r = backtest(m.group(1), g1("modele", "gradient_boosting"), g1("date"), int(g1("nb_jours") or 15))
+        r = backtest(m.group(1), g1("modele", "gradient_boosting"), g1("date"), int(g1("nb_jours") or 15),
+                     hybride=g1("hybride", "1") != "0")
         st = STORE.get(m.group(1))
         if r and st:
             sc = st["scores"].get(g1("modele", "gradient_boosting"), {})

@@ -3237,6 +3237,82 @@ class River:
 
         return model_hybride
 
+    def entrainer_incertitude2(self, nom_modele):
+        """
+        Version sklearn (SANS TensorFlow) de entrainer_incertitude().
+        Même principe exactement : l'espérance reste 100% celle du modèle de base ;
+        seule la VARIANCE des résidus est apprise -- ici par un régresseur sklearn
+        PAR horizon qui estime E[résidu² | X] (la variance conditionnelle), d'où
+        l'écart-type. Interface identique (ModeleHybride : predict() + estimators_
+        avec pred_dist()->{loc, scale}), donc utilisable tel quel par
+        tracer_prediction() / donnees_prediction_passee() / predire_futur().
+        """
+        if nom_modele not in self.modeles:
+            self._log(f"Modèle '{nom_modele}' introuvable. Entraîne-le d'abord.", "erreur")
+            return None
+
+        model_base = self.modeles[nom_modele]["model"]
+        espace = self.modeles[nom_modele].get("espace", "brut")
+
+        X_train_espace = self.X_train_pca if espace == "pca" else self.X_train2
+
+        self._log(f"Calcul des résidus de '{nom_modele}'...")
+        predictions_train = model_base.predict(X_train_espace)
+        residus_train = self.Y_train2.values - predictions_train
+
+        X_train_np = np.asarray(X_train_espace, dtype=np.float64)
+        n_outputs = residus_train.shape[1]
+
+        # Un régresseur de variance par horizon : cible = résidu² (estimateur de la
+        # variance conditionnelle). La perte MSE de l'arbre estime E[résidu²|X].
+        self._log(f"Entraînement des régresseurs de variance (sklearn) pour '{nom_modele}'...")
+        modeles_variance = []
+        for i in range(n_outputs):
+            self._verifier_arret()
+            cible_var = residus_train[:, i] ** 2
+            reg = HistGradientBoostingRegressor(
+                max_iter=200, max_depth=6, learning_rate=0.05, min_samples_leaf=20,
+                l2_regularization=1.0, early_stopping=True, validation_fraction=0.1,
+                n_iter_no_change=15, random_state=42,
+            )
+            reg.fit(X_train_np, cible_var)
+            modeles_variance.append(reg)
+
+        class DummyDist:
+            def __init__(self, loc, scale):
+                self.params = {'loc': loc, 'scale': scale}
+
+        class DummyEstimator2:
+            def __init__(self, model_base, regs_var, horizon_idx):
+                self.model_base = model_base
+                self.regs_var = regs_var
+                self.horizon_idx = horizon_idx
+
+            def pred_dist(self, X):
+                mu = self.model_base.predict(X)[:, self.horizon_idx]
+                var = np.clip(self.regs_var[self.horizon_idx].predict(np.asarray(X, dtype=np.float64)), 1e-6, None)
+                return DummyDist(loc=mu, scale=np.sqrt(var))
+
+        class ModeleHybride2:
+            """Espérance (modèle de base) + variance (régresseurs sklearn) : mêmes
+            méthodes que ModeleHybride."""
+            def __init__(self, model_base, regs_var, n_horizons):
+                self.model_base = model_base
+                self.regs_var = regs_var
+                self.estimators_ = [DummyEstimator2(model_base, regs_var, i) for i in range(n_horizons)]
+
+            def predict(self, X):
+                return self.model_base.predict(X)
+
+        model_hybride = ModeleHybride2(model_base, modeles_variance, n_outputs)
+
+        self.modeles[nom_modele]["hybride"] = model_hybride
+        self.modeles[nom_modele]["modele_variance"] = modeles_variance
+
+        self._log(f"Modèle hybride (sklearn) prêt pour '{nom_modele}' !", "succes")
+
+        return model_hybride
+
     def auditer_incertitude(self, nom_modele):
         """Évalue si les intervalles de confiance (la variance) du modèle hybride
         sont honnêtes et utiles (couverture empirique, largeur, NLL)."""
