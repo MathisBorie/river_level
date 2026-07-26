@@ -101,6 +101,13 @@ const pluginPivot = {
   },
 };
 if (window.Chart) Chart.register(pluginPivot);
+// Info-bulle épinglée en haut du graphe (ne cache plus la courbe, surtout sur mobile).
+if (window.Chart) {
+  Chart.Tooltip.positioners.hautCentre = function (elements, pos) {
+    const a = this.chart.chartArea;
+    return { x: a.left + a.width / 2, y: a.top + 2 };
+  };
+}
 
 // Options communes + création d'un graphique linéaire interactif.
 // pivotIndex : index (catégorie) où tracer le trait « aujourd'hui » (ou null).
@@ -118,6 +125,7 @@ function dessinerCourbe(canvasId, labels, datasets, pivotIndex = null) {
         lignePivot: { index: pivotIndex },
         legend: { labels: { filter: (it) => !it.text.startsWith("_"), boxWidth: 12, font: { size: 11 } } },
         tooltip: {
+          position: "hautCentre", yAlign: "top", caretSize: 0,
           filter: (it) => !it.dataset.label.startsWith("_") && it.parsed.y != null,
           callbacks: {
             title: (items) => (items.length ? items[0].label : ""),
