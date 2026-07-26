@@ -314,13 +314,15 @@
     </div>
 
     <div class="carte-ui" id="carte-stockage">
-      <h3>💾 Stockage — gérer les fichiers</h3>
-      <p class="aide">Occupé sur cet appareil : <b id="stockage-total">…</b>. Supprime précisément ce dont
-      tu n'as plus besoin (un modèle lourd, le jeu de test, les fichiers de travail, ou toute une station)
-      pour libérer de la place. Le Gradient Boosting est le plus gros ; Ridge causal est minuscule.</p>
+      <h3>💾 Modèles enregistrés sur cet appareil</h3>
+      <p class="aide">Occupé : <b id="stockage-total">…</b>. Tu peux <b>exporter</b> un modèle dans un fichier
+      pour l'envoyer à quelqu'un, ou <b>importer</b> un modèle reçu. Supprime ce dont tu n'as plus besoin
+      pour libérer de la place.</p>
       <div class="rangee-boutons">
-        <button id="btn-sauvegarder" class="secondaire">💾 Sauvegarder la station courante</button>
-        <button id="btn-rafraichir-stockage" class="secondaire">↻ Rafraîchir la liste</button>
+        <button id="btn-importer-modele" class="secondaire">📥 Importer un modèle (fichier)</button>
+        <button id="btn-rafraichir-stockage" class="secondaire">↻ Rafraîchir</button>
+        <button id="btn-sauvegarder" class="secondaire cache">💾 Sauvegarder</button>
+        <input id="fichier-modele" type="file" accept=".riverlab,.joblib" style="display:none">
       </div>
       <div id="inventaire-stockage"></div>
     </div>

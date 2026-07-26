@@ -1160,7 +1160,8 @@ async function rendreInventaireStockage() {
       `<div class="bloc-station">` +
       `<div class="bloc-station-tete"><b>${s.nom || s.code}</b> <span class="ind">${s.code}</span>` +
       `<span class="bloc-station-taille">${octetsLisibles(s.octets_total)}</span>` +
-      `<button class="secondaire danger mini" data-code="${s.code}" data-cible="station">Tout supprimer</button></div>` +
+      `<button class="secondaire mini" data-export="${s.code}" title="Télécharger ce modèle dans un fichier">⤓ Exporter</button>` +
+      `<button class="secondaire danger mini" data-code="${s.code}" data-cible="station">Supprimer</button></div>` +
       (lignes.length ? `<ul class="liste-stockage">${lignes.join("")}</ul>` : "") +
       `</div>`
     );
@@ -1169,7 +1170,60 @@ async function rendreInventaireStockage() {
   conteneur.querySelectorAll("[data-cible]").forEach((btn) => {
     btn.addEventListener("click", () => supprimerStockage(btn.dataset.code, btn.dataset.cible));
   });
+  conteneur.querySelectorAll("[data-export]").forEach((btn) => {
+    btn.addEventListener("click", () => exporterModele(btn.dataset.export));
+  });
 }
+
+// ---- partage de modèles : export vers un fichier, import depuis un fichier ----
+function _b64versBlob(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: "application/octet-stream" });
+}
+function _bufferVersB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+
+async function exporterModele(code) {
+  try {
+    const res = await api(`/api/riviere/${code}/exporter`);
+    const url = URL.createObjectURL(_b64versBlob(res.b64));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(res.nom || code).replace(/[^\w\-]+/g, "_")}.riverlab`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`Modèle exporté (${octetsLisibles(res.octets)}). Tu peux envoyer ce fichier.`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$("btn-importer-modele").addEventListener("click", () => $("fichier-modele").click());
+$("fichier-modele").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  ev.target.value = "";  // permet de ré-importer le même fichier
+  try {
+    const b64 = _bufferVersB64(await file.arrayBuffer());
+    const res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64 }) });
+    if (res.erreur) throw new Error(res.erreur);
+    toast(`Importé : ${res.nom} — modèles : ${res.modeles.join(", ")}.`);
+    await rendreInventaireStockage();
+    if (res.code) {
+      $("drawer-reglages").classList.add("cache");
+      $("drawer-fond").classList.add("cache");
+      ouvrirStation(res.code);
+    }
+  } catch (e) {
+    toast("Import impossible : " + e.message, true);
+  }
+});
 
 async function supprimerStockage(code, cible) {
   const nom = cible === "station" ? "TOUTE la station " + code
