@@ -225,11 +225,30 @@ header h1::first-letter { }
 @media (max-width: 950px) {
   .scene {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(58vh, 1fr) auto auto auto auto;
+    grid-template-rows: minmax(74vh, 1fr) auto auto auto auto;
     height: auto;
   }
   .panneau.actif { grid-column: 1; grid-row: 1; }
   .panneau.miniature { grid-column: 1; }
+  /* graphes bien plus grands + contrôles compacts sur mobile */
+  .panneau.actif .zone-graphe { min-height: 46vh; }
+  .barre-controles { gap: 7px 10px; margin-bottom: 8px; }
+  .barre-controles label, .barre-controles .case { font-size: 0.82rem; }
+  .barre-controles input, .barre-controles select { padding: 5px 7px; }
+}
+
+/* En-tête : sur mobile on retire l'e-mail (déplacé dans les réglages) et on
+   laisse « River Lab » + la phrase tenir sur la ligne. */
+#contact-projet { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--bord); text-align: center; }
+@media (max-width: 760px) {
+  header { padding: 0 13px; gap: 9px; }
+  header h1 { font-size: 1.02rem; white-space: nowrap; }
+  #credit-auteur { display: none; }
+  #sous-titre { font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #btn-retour { flex: none; white-space: nowrap; }
+}
+@media (max-width: 480px) {
+  #sous-titre { display: none; }
 }
 
 /* ---------- carte ---------- */
