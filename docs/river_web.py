@@ -11,7 +11,9 @@ Python (STORE) le temps de la session.
 """
 import time
 import os
+import io
 import math
+import base64
 import asyncio
 import warnings
 warnings.filterwarnings("ignore")  # silence les notices pandas (fragmentation, to_datetime)
@@ -100,6 +102,44 @@ def _inventaire():
         stations.append({"code": code, "nom": nom_station, "octets_total": octets,
                          "octets_test": 0, "octets_travail": 0, "modeles": modeles})
     return {"octets_total": total, "stations": stations}
+
+
+def exporter(code):
+    """Sérialise le modèle complet d'une station (modèles + incertitude + zones +
+    points) en base64, pour le télécharger en fichier .riverlab et l'envoyer à
+    quelqu'un d'autre."""
+    if code not in STORE:
+        return {"erreur": "Aucun modèle à exporter pour cette station."}
+    paquet = {"format": "riverlab-1", "code": code, "store": STORE.get(code),
+              "zones": ZONES.get(code), "selection": SELECTION.get(code)}
+    buf = io.BytesIO()
+    joblib.dump(paquet, buf, compress=3)
+    octets = buf.getvalue()
+    nom = (STORE[code]["meta"].get("nom") or code)
+    return {"code": code, "nom": nom, "octets": len(octets),
+            "b64": base64.b64encode(octets).decode("ascii")}
+
+
+def importer(b64):
+    """Charge un fichier .riverlab (base64) reçu d'un autre utilisateur et l'ajoute
+    aux modèles de cet appareil (sauvegardé automatiquement)."""
+    try:
+        paquet = joblib.load(io.BytesIO(base64.b64decode(b64)))
+    except Exception as e:
+        return {"erreur": f"Fichier illisible ou corrompu : {e}"}
+    if not isinstance(paquet, dict) or paquet.get("format") != "riverlab-1" or "code" not in paquet:
+        return {"erreur": "Ce fichier n'est pas un modèle River Lab."}
+    code = paquet["code"]
+    if paquet.get("store"):
+        STORE[code] = paquet["store"]
+    if paquet.get("zones"):
+        ZONES[code] = paquet["zones"]
+    if paquet.get("selection"):
+        SELECTION[code] = paquet["selection"]
+    _sauver(code)
+    nom = STORE[code]["meta"].get("nom", code) if code in STORE else code
+    modeles = [NOMS_MODELE.get(n, n) for n in STORE[code]["scores"].keys()] if code in STORE else []
+    return {"code": code, "nom": nom, "modeles": modeles}
 
 
 def _supprimer(code, cible):
@@ -1110,6 +1150,7 @@ def pca_analyse(code, seuil):
 # sélection 2 temps, entraînement (barre de progression), backtest, prévision.
 # ==========================================================================
 import json as _json
+import re
 from urllib.parse import urlparse, parse_qs
 
 INFOS = {}   # code -> {"nom","lat","lon"}
@@ -1237,8 +1278,12 @@ async def _traiter(method, path, body):
         return _json.dumps(_inventaire())
     if p == "/api/stockage/supprimer" and method == "POST":
         return _json.dumps(_supprimer(body.get("code"), body.get("cible", "station")))
+    if p == "/api/importer" and method == "POST":
+        return _json.dumps(importer(body.get("b64", "")))
+    m = re.match(r"^/api/riviere/([^/]+)/exporter$", p)
+    if m:
+        return _json.dumps(exporter(m.group(1)))
 
-    import re
     m = re.match(r"^/api/riviere/([^/]+)$", p)
     if m:
         return _json.dumps(await etat(m.group(1)))
