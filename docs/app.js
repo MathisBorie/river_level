@@ -701,7 +701,7 @@ $("btn-lancer-points").addEventListener("click", async () => {
   try {
     const { job_id } = await post(`/api/riviere/${etat.code}/points`, corps);
     quitterModeSelection();
-    suivreJob(job_id, "Points manuels → données complètes → Gradient Boosting");
+    suivreJob(job_id, "Entraînement sur tes points…");
   } catch (e) {
     toast(e.message, true);
   }
@@ -785,11 +785,8 @@ $("btn-pipeline").addEventListener("click", async () => {
   }
   try {
     const { job_id } = await post(`/api/riviere/${etat.code}/pipeline`, corps);
-    const titre = methode === "genetique"
-      ? "Pipeline (sélection génétique)"
-      : "Pipeline (sélection 2 temps : altitude+couverture → corrélation+neige)";
     activerPanneau("carte");   // on regarde les points apparaître en direct
-    suivreJob(job_id, titre);
+    suivreJob(job_id, "Analyse de la rivière en cours…");
   } catch (e) {
     toast(e.message, true);
   }
@@ -864,7 +861,7 @@ document.querySelectorAll(".btn-un-modele").forEach((bouton) => {
     const corps = { modele, incertitude: $("opt-incertitude").checked, seuil_energie: seuilEnergie() };
     try {
       const { job_id } = await post(`/api/riviere/${etat.code}/entrainer-modele`, corps);
-      suivreJob(job_id, `Entraînement de ${modele} + incertitude`);
+      suivreJob(job_id, `Entraînement : ${NOMS_MODELES[modele] || modele}`);
     } catch (e) {
       toast(e.message, true);
     }
@@ -878,9 +875,11 @@ function suivreJob(jobId, titre) {
   $("barre-job").classList.remove("cache");
   $("btn-arreter-job").classList.remove("cache");
   $("btn-arreter-job").disabled = false;
-  $("btn-arreter-job").textContent = "⏹️ Arrêter";
+  $("btn-arreter-job").textContent = "Arrêter";
+  $("btn-plier-log").classList.remove("cache");
+  $("job-log").classList.add("cache");
   $("job-titre").textContent = titre;
-  $("job-statut").textContent = "⏳ en cours…";
+  $("job-statut").textContent = "En cours…";
   $("job-log").textContent = "";
   rendreProgres(null);
   bouclePollingJob();
@@ -899,11 +898,11 @@ function rendreProgres(p) {
   if (p.pct == null) {
     // étape à durée inconnue → bande animée, pas de %
     piste.classList.add("indetermine");
-    $("job-progres-pct").textContent = "en cours…";
+    $("job-progres-pct").textContent = "";
     $("job-progres-barre").style.width = "";
   } else {
     piste.classList.remove("indetermine");
-    $("job-progres-pct").textContent = `${p.pct}%` + (p.total ? ` (${p.courant}/${p.total})` : "");
+    $("job-progres-pct").textContent = `${p.pct}%`;
     $("job-progres-barre").style.width = p.pct + "%";
   }
 }
@@ -911,11 +910,11 @@ function rendreProgres(p) {
 $("btn-arreter-job").addEventListener("click", async () => {
   if (etat.jobId == null) return;
   $("btn-arreter-job").disabled = true;
-  $("btn-arreter-job").textContent = "arrêt demandé…";
-  $("job-statut").textContent = "⏹️ arrêt demandé, fin de l'étape en cours…";
+  $("btn-arreter-job").textContent = "Arrêt en cours…";
+  $("job-statut").textContent = "Arrêt en cours (fin de l'étape en cours)…";
+  $("job-progres-piste").classList.add("indetermine");
   try {
     await post(`/api/jobs/${etat.jobId}/arreter`);
-    toast("Arrêt demandé : le calcul s'interrompra au prochain point de contrôle.");
   } catch (e) {
     toast(e.message, true);
   }
@@ -948,9 +947,10 @@ async function bouclePollingJob() {
 
   $("btn-arreter-job").classList.add("cache");
   $("job-progres").classList.add("cache");
+  $("job-progres-piste").classList.remove("indetermine");
 
   if (job.statut === "termine") {
-    $("job-statut").textContent = "✅ terminé";
+    $("job-statut").textContent = "Terminé ✅";
     const r = job.resultat || {};
     if (r.score_gradient_boosting != null) {
       const parts = [`✅ Modèle prêt — fiabilité ${(r.score_gradient_boosting * 100).toFixed(0)} %`];
@@ -960,26 +960,32 @@ async function bouclePollingJob() {
     } else if (r.temps_reponse_jours != null) {
       toast(`Terminé ! Temps de réponse du bassin : ~${r.temps_reponse_jours} j.`);
     } else {
-      toast("Job terminé !");
+      toast("Terminé !");
     }
-    if (r.image) {
-      $("image-pca").src = "data:image/png;base64," + r.image;
-      $("image-pca").classList.remove("cache");
-    }
+    fermerFenetreJobBientot();
   } else if (job.statut === "arrete") {
-    $("job-statut").textContent = "⏹️ arrêté";
-    toast("Calcul arrêté. Tu peux relancer avec les bons paramètres.");
+    $("job-statut").textContent = "Arrêté.";
+    toast("Calcul arrêté.");
+    fermerFenetreJobBientot();
   } else {
-    $("job-statut").textContent = "❌ erreur : " + (job.erreur || "inconnue");
-    toast("Le job a échoué : " + (job.erreur || ""), true);
+    $("job-statut").textContent = "Erreur : " + (job.erreur || "inconnue");
+    toast("Échec : " + (job.erreur || ""), true);
   }
   etat.jobId = null;
   rendreQuota();
   await rafraichirEtat();
 }
 
+// Masque la fenêtre quelques secondes après la fin (sauf si un nouveau job a démarré).
+function fermerFenetreJobBientot() {
+  setTimeout(() => {
+    if (etat.jobId == null) $("barre-job").classList.add("cache");
+  }, 6000);
+}
+
 $("btn-plier-log").addEventListener("click", () => {
-  $("job-log").classList.toggle("cache");
+  const cache = $("job-log").classList.toggle("cache");
+  $("btn-plier-log").textContent = cache ? "Voir le détail" : "Masquer le détail";
 });
 
 $("btn-reduire-job").addEventListener("click", () => {

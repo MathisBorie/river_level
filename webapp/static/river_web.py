@@ -294,7 +294,7 @@ async def determiner_zones(code, log, prog, arret, n_grille=15, max_par_zone=25)
     if lat0 is None or lon0 is None:
         raise ValueError("Position de la station inconnue.")
     arret()
-    prog("Surface du bassin versant", None); log("Lecture de la surface du bassin (Hub'Eau)…")
+    prog("Recherche du bassin versant", None); log("Lecture de la surface du bassin (Hub'Eau)…")
     surface = await _surface_bv(code)
     rayon_km = min(300.0, max(25.0, 2.5 * math.sqrt(surface))) if surface else 60.0
     dlat = rayon_km / 111.0
@@ -302,7 +302,7 @@ async def determiner_zones(code, log, prog, arret, n_grille=15, max_par_zone=25)
     bbox = f"{lon0-dlon},{lat0-dlat},{lon0+dlon},{lat0+dlat}"
 
     arret()
-    prog("Interrogation de l'API Sandre", None); log("🌍 Récupération des bassins versants (Sandre)…")
+    prog("Recherche du bassin versant", None); log("🌍 Récupération des bassins versants (Sandre)…")
     url = ("https://services.sandre.eaufrance.fr/geo/sandre?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature"
            f"&typeName=ZoneHydro_FXX&outputFormat=geojson&bbox={bbox}")
     data = await _fetch_json(url)
@@ -313,7 +313,7 @@ async def determiner_zones(code, log, prog, arret, n_grille=15, max_par_zone=25)
     retenues, _exclues = _zones_amont(zones, surface, code, log)
     geojson = {"type": "FeatureCollection", "features": retenues}
 
-    prog("Génération des points candidats", None); log("🎯 Génération des points à l'intérieur des zones…")
+    prog("Repérage des zones amont", None); log("🎯 Génération des points à l'intérieur des zones…")
     points_par_zone = {}
     for i, f in enumerate(retenues):
         arret()
@@ -415,7 +415,7 @@ async def _preselection(code, n_points, poids_altitude, poids_zones, log, prog, 
     n = len(candidats)
     if n == 0:
         raise ValueError("Aucun point candidat dans le bassin.")
-    prog("Altitude des candidats", None); log(f"⛰️ Altitude de {n} points candidats (gratuit)…")
+    prog("Analyse du relief", None); log(f"⛰️ Altitude de {n} points candidats (gratuit)…")
     alt_brut = await _fetch_elevations(candidats)
     if n_points >= n:
         return candidats, [float(a) if a is not None else 0.0 for a in alt_brut]
@@ -436,7 +436,7 @@ async def _preselection(code, n_points, poids_altitude, poids_zones, log, prog, 
     d2 = ((pts3d[:, None, :] - pts3d[None, :, :]) ** 2).sum(-1)
     similarite = np.exp(-d2 / (sigma_km ** 2))
 
-    prog("Présélection (altitude + couverture + zones)", None)
+    prog("Sélection des meilleurs points", None)
     log(f"🧮 Présélection gloutonne de {n_points} points parmi {n}…")
     meilleure_sim = np.zeros(n); compte_zone = np.zeros(n_zones); choisis = []; dispo = set(range(n))
     for _ in range(n_points):
@@ -469,7 +469,7 @@ async def _selection_finale(code, points, n_final, fenetre_annees, poids_pluie, 
     fin = pd.Timestamp.now().normalize() - pd.Timedelta(days=1)   # l'archive s'arrête à hier
     debut = fin - pd.Timedelta(days=int(365.25 * fenetre_annees))
     s, e = debut.strftime("%Y-%m-%d"), fin.strftime("%Y-%m-%d")
-    prog("Étape 2 : téléchargement léger (pluie + neige)", None)
+    prog("Analyse pluie & neige", None)
     log(f"📥 Étape 2 : {len(points)} points sur {s}→{e} (pluie quotidienne + neige)…")
     df_eau = await debit(code, s, e)
     serie = df_eau.dropna(subset=["debit_L_s"]).set_index("date")["debit_L_s"].sort_index()
@@ -585,7 +585,7 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
         for h in range(nh):
             arret()
             est = _gb(); est.fit(Xtr, Y[:, h]); ests.append(est)
-            prog("Entraînement : Gradient Boosting (1 modèle/horizon)",
+            prog("Entraînement du modèle",
                  int((idx + (h + 1) / nh) / nb * 100), idx + 1, nb)
             if h % 2 == 0:
                 await asyncio.sleep(0)
@@ -625,7 +625,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     t_dl = time.time() - t0
     await asyncio.sleep(0)
 
-    prog("Construction des variables", None); log("Construction des variables explicatives…")
+    prog("Préparation des données", None); log("Construction des variables explicatives…")
     df, feats, targets = construire(df_eau, df_meteo, past, horizon)
     n = len(df); split = int(n * 0.8)
     if n < 50:
