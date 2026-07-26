@@ -47,6 +47,7 @@ body {
 #overlay-chargement.fini { opacity: 0; pointer-events: none; }
 #overlay-chargement .titre { font-size: 1.4rem; font-weight: 750; }
 #overlay-chargement .msg { font-size: .9rem; opacity: .85; max-width: 440px; text-align: center; line-height: 1.5; }
+#overlay-chargement .msg-note { display: inline-block; margin-top: 8px; font-size: .8rem; opacity: .7; font-style: italic; }
 #overlay-chargement .spin {
   width: 42px; height: 42px; border-radius: 50%;
   border: 4px solid rgba(255,255,255,.25); border-top-color: #17b3a3;
@@ -246,6 +247,10 @@ header h1::first-letter { }
   #credit-auteur { display: none; }
   #sous-titre { font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #btn-retour { flex: none; white-space: nowrap; }
+  /* barre des stations : recherche pleine largeur, filtre + compteur alignés dessous */
+  .barre-outils { flex-wrap: wrap; gap: 8px 14px; padding: 10px 13px; }
+  #recherche-station { flex: 1 1 100%; }
+  #carte-stations { height: calc(100vh - var(--entete-h) - 96px); }
 }
 @media (max-width: 480px) {
   #sous-titre { display: none; }
