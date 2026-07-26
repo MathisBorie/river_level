@@ -206,6 +206,17 @@
       </div>
 
       <div class="champ-reglage">
+        <label>Température</label>
+        <div class="champ-controle">
+          <select id="opt-temp-mode">
+            <option value="moyenne">moyenne du jour</option>
+            <option value="minmax">min, max &amp; moyenne (détecte le gel)</option>
+          </select>
+        </div>
+        <span class="champ-aide">« min, max » ajoute les températures mini et maxi du jour — utile pour repérer le gel (mini &lt; 0 °C) et l'amplitude, plus d'info que la seule moyenne.</span>
+      </div>
+
+      <div class="champ-reglage">
         <label>Mesure de la fiabilité</label>
         <div class="champ-controle">
           <select id="opt-mode-split">
