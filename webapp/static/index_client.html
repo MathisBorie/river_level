@@ -183,85 +183,59 @@
     le bouton « Analyser cette rivière » les utilise directement.</p>
 
     <div class="carte-ui" id="carte-pipeline">
-      <h3>🎯 Sélection des points &amp; données</h3>
-      <table class="params">
-        <tbody>
-          <tr>
-            <th>Fenêtre d'apprentissage</th>
-            <td colspan="2">
-              du <input id="opt-train-debut" type="date">
-              au <input id="opt-train-fin" type="date">
-            </td>
-          </tr>
-          <tr>
-            <th>Jours passés utilisés <span class="ind">(pour prédire)</span></th>
-            <td><input id="opt-past-day" type="number" value="20" min="1" max="60"></td>
-            <td class="ind">historique de débit + météo en entrée</td>
-          </tr>
-          <tr>
-            <th>Jours à prédire <span class="ind">(horizon)</span></th>
-            <td><input id="opt-predict-day" type="number" value="15" min="1" max="100"></td>
-            <td class="ind">au-delà de ~15 j, météo = saison</td>
-          </tr>
-          <tr>
-            <th>Découpage train / test</th>
-            <td colspan="2">
-              <select id="opt-mode-split">
-                <option value="annees_aleatoires">années tirées au sort (recommandé)</option>
-                <option value="chronologique">chronologique (80 % / 20 %)</option>
-              </select>
-              part test <input id="opt-part-test" type="number" value="0.2" min="0.05" max="0.5" step="0.05" style="width:70px">
-            </td>
-          </tr>
-          <tr>
-            <th>Température</th>
-            <td colspan="2">
-              <select id="opt-agg-temp">
-                <option value="moyenne">moyenne journalière (léger, ~130 dim)</option>
-                <option value="horaire">horaire, 24 valeurs (lourd, ~1800 dim)</option>
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <th>Neige</th>
-            <td colspan="2">
-              <select id="opt-agg-neige">
-                <option value="minuit">à minuit (stock, 1 valeur)</option>
-                <option value="moyenne">moyenne journalière</option>
-                <option value="horaire">horaire, 24 valeurs</option>
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <th>Méthode de sélection des points</th>
-            <td colspan="2">
-              <select id="opt-methode-selection">
-                <option value="deux_temps">2 temps : altitude+couverture (gratuit) → corrélation+neige (léger)</option>
-              </select>
-            </td>
-          </tr>
-          <tr id="ligne-deux-temps">
-            <th>Points météo <span class="ind">(présélection → finaux)</span></th>
-            <td colspan="2">
-              présélection <input id="opt-n-preselection" type="number" value="30" min="5" max="120" style="width:70px" title="Nombre de points gardés à l'étape 1 (gratuite, sur altitude+couverture)">
-              → finaux <input id="opt-n-final" type="number" value="5" min="1" max="20" style="width:60px" title="Nombre de points retenus au final (étape 2, corrélation pluie→débit + neige)">
-              <span class="ind" style="display:block">poids
-                pluie <input id="opt-poids-pluie" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
-                neige <input id="opt-poids-neige" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
-                altitude <input id="opt-poids-altitude" type="number" value="1" min="0" max="3" step="0.5" style="width:56px">
-              </span>
-            </td>
-          </tr>
-          <tr id="ligne-genetique" style="display:none">
-            <th>Sélection génétique</th>
-            <td colspan="2">
-              population <input id="opt-population" type="number" value="20" min="4" style="width:70px">
-              générations <input id="opt-generations" type="number" value="50" min="1" style="width:70px">
-              horizon <input id="opt-ga-horizon" type="number" value="3" min="1" max="15" style="width:60px" title="Horizon (jours) utilisé pour classer les points pendant le GA — 3 suffit et va vite">
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <h3>🎯 Réglages de l'analyse</h3>
+
+      <div class="champ-reglage">
+        <label>Période d'apprentissage</label>
+        <div class="champ-controle">
+          du <input id="opt-train-debut" type="date"> au <input id="opt-train-fin" type="date">
+        </div>
+        <span class="champ-aide">Laisser vide pour utiliser les 10 dernières années.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Jours à prédire</label>
+        <div class="champ-controle"><input id="opt-predict-day" type="number" value="15" min="1" max="100"> jours</div>
+        <span class="champ-aide">L'horizon de la prévision. Au-delà de ~15 jours, la météo devient saisonnière.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Jours d'historique en entrée</label>
+        <div class="champ-controle"><input id="opt-past-day" type="number" value="20" min="1" max="60"> jours</div>
+        <span class="champ-aide">Combien de passé le modèle regarde pour faire sa prévision.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Mesure de la fiabilité</label>
+        <div class="champ-controle">
+          <select id="opt-mode-split">
+            <option value="annees_aleatoires">années tirées au sort</option>
+            <option value="chronologique">période la plus récente</option>
+          </select>
+          <input id="opt-part-test" type="number" value="0.2" min="0.05" max="0.5" step="0.05"> de test
+        </div>
+        <span class="champ-aide">Part des données mises de côté pour vérifier la précision du modèle.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Nombre de points météo</label>
+        <div class="champ-controle">
+          <input id="opt-n-preselection" type="number" value="30" min="5" max="120"> candidats →
+          <input id="opt-n-final" type="number" value="5" min="1" max="20"> retenus
+        </div>
+        <span class="champ-aide">Points d'où provient la météo. Plus de points = plus précis mais plus long.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Importance des critères</label>
+        <div class="champ-controle">
+          pluie <input id="opt-poids-pluie" type="number" value="1" min="0" max="3" step="0.5">
+          neige <input id="opt-poids-neige" type="number" value="1" min="0" max="3" step="0.5">
+          altitude <input id="opt-poids-altitude" type="number" value="1" min="0" max="3" step="0.5">
+        </div>
+        <span class="champ-aide">Poids donné à chaque critère pour choisir les meilleurs points.</span>
+      </div>
+
       <p class="aide" id="cout-estimation" style="margin:6px 0 0"></p>
       <div class="rangee-boutons" style="display:none">
         <button id="btn-donnees" class="secondaire">📥 Recevoir les données seules</button>
