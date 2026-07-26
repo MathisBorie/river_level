@@ -599,7 +599,7 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
 
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
-                    log=None, prog=None, arret=None, debut_str=None, fin_str=None):
+                    log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
     arret = arret or (lambda: None)
@@ -642,7 +642,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
         prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
         log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
         await asyncio.sleep(0)
-        m, sc = await _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog, arret, idx, nb)
+        m, sc = await _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog, arret, idx, nb, seuil_pca)
         if m is None:
             continue
         objets[nom] = m
@@ -732,7 +732,8 @@ async def _run_points(jid, code, body):
                                past=int(body.get("past_day", 20)), horizon=int(body.get("predict_day", 15)),
                                modeles=(modele,),
                                log=log, prog=prog, arret=arret,
-                               debut_str=body.get("start_train"), fin_str=body.get("end_train"))
+                               debut_str=body.get("start_train"), fin_str=body.get("end_train"),
+                               seuil_pca=float(body.get("seuil_energie") or 99))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé)")
@@ -746,7 +747,7 @@ async def _run_points(jid, code, body):
         log("❌ " + traceback.format_exc()[-700:]); job["statut"] = "erreur"
 
 
-async def ajouter_modeles(code, noms, log, prog, arret):
+async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99):
     """Entraîne un/des modèle(s) SUPPLÉMENTAIRE(S) sur les données déjà en mémoire
     (aucun re-téléchargement) et les ajoute à STORE[code]."""
     st = STORE.get(code)
@@ -758,7 +759,7 @@ async def ajouter_modeles(code, noms, log, prog, arret):
         prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
         log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
         await asyncio.sleep(0)
-        m, sc = await _fit_modele(nom, d["Xtr"], d["Ytr"], d["Xte"], d["Yte"], targets, prog, arret, idx, nb)
+        m, sc = await _fit_modele(nom, d["Xtr"], d["Ytr"], d["Xte"], d["Yte"], targets, prog, arret, idx, nb, seuil_pca)
         if m is None:
             continue
         st["modeles"][nom] = m; st["scores"][nom] = sc
@@ -767,14 +768,14 @@ async def ajouter_modeles(code, noms, log, prog, arret):
     return {"modeles": list(st["scores"].keys())}
 
 
-async def _run_ajouter(jid, code, noms):
+async def _run_ajouter(jid, code, noms, seuil_pca=99):
     job = JOBS[jid]
     log, prog, arret = _cbs(job)
     try:
         noms = [n for n in noms if n in MODELES_DISPO]
         if not noms:
             raise ValueError("Aucun modèle valide à entraîner.")
-        job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret)
+        job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret, seuil_pca=seuil_pca)
         _sauver(code)
         log("✅ Terminé (sauvegardé sur cet appareil).")
         job["statut"] = "termine"
@@ -829,7 +830,8 @@ async def _run_pipeline(jid, code, body):
         info = await entrainer(code, coords=coords, past=past, horizon=horizon,
                                modeles=(modele,),
                                log=log, prog=prog, arret=arret,
-                               debut_str=body.get("start_train"), fin_str=body.get("end_train"))
+                               debut_str=body.get("start_train"), fin_str=body.get("end_train"),
+                               seuil_pca=float(body.get("seuil_energie") or 99))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé sur cet appareil)")
@@ -944,6 +946,26 @@ async def prevision(code, modele, nb_jours=None):
     return {"pivot": today.strftime("%Y-%m-%d"), "hybride": False,
             "observe": observe, "points": points, "modele": modele,
             "score": sc.get("r2"), "scores_detail": sc.get("detail"), "unite": "m³/s"}
+
+
+def pca_analyse(code, seuil):
+    """PCA seule (sans entraîner) : variance expliquée par composante + variance
+    cumulée, et nombre de composantes atteignant l'énergie demandée. Sert au
+    graphe PCA et au choix de l'énergie conservée."""
+    st = STORE.get(code)
+    if not st or "data" not in st:
+        return {"erreur": "Analyse d'abord la rivière (aucune donnée en mémoire)."}
+    Xtr = st["data"]["Xtr"]
+    p = PCA(svd_solver="full").fit(Xtr)
+    ratio = p.explained_variance_ratio_ * 100.0
+    cum = np.cumsum(ratio)
+    energie = float(seuil)
+    n = int(np.searchsorted(cum, energie) + 1)
+    n = max(1, min(n, len(cum)))
+    return {"n_composantes": n, "n_total": int(len(cum)), "energie": energie,
+            "n_features": int(Xtr.shape[1]),
+            "variance_cumulee": [float(x) for x in cum],
+            "variance_par_comp": [float(x) for x in ratio]}
 
 
 # ==========================================================================
@@ -1095,6 +1117,9 @@ async def _traiter(method, path, body):
     if m:
         return _json.dumps(await prevision(m.group(1), g1("modele", "gradient_boosting"),
                                            int(g1("nb_jours")) if g1("nb_jours") else None))
+    m = re.match(r"^/api/riviere/([^/]+)/pca$", p)
+    if m:
+        return _json.dumps(pca_analyse(m.group(1), float(g1("seuil") or 99)))
     m = re.match(r"^/api/riviere/([^/]+)/backtest$", p)
     if m:
         r = backtest(m.group(1), g1("modele", "gradient_boosting"), g1("date"), int(g1("nb_jours") or 15))
@@ -1123,12 +1148,14 @@ async def _traiter(method, path, body):
     m = re.match(r"^/api/riviere/([^/]+)/entrainer-modele$", p)
     if m and method == "POST":
         jid = _job_nouveau("entrainer", m.group(1))
-        asyncio.ensure_future(_run_ajouter(jid, m.group(1), [body.get("modele")]))
+        asyncio.ensure_future(_run_ajouter(jid, m.group(1), [body.get("modele")],
+                                           seuil_pca=float(body.get("seuil_energie") or 99)))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/entrainer$", p)
     if m and method == "POST":
         jid = _job_nouveau("entrainer", m.group(1))
-        asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or []))
+        asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or [],
+                                           seuil_pca=float(body.get("seuil_energie") or 99)))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/sauvegarder$", p)
     if m and method == "POST":

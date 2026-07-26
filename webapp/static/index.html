@@ -292,11 +292,23 @@
         <button id="btn-entrainer" class="secondaire">Entraîner les modèles cochés</button>
       </div>
 
-      <!-- éléments propres à la version serveur (PCA/Keras/incertitude), gardés cachés -->
-      <select id="opt-pca-energie" class="cache"><option value="99" selected>99</option></select>
+      <!-- PCA seule (sklearn, sans TensorFlow) : compression + graphe de l'énergie -->
+      <h3 style="margin-top:18px">📉 PCA (analyse en composantes principales)</h3>
+      <p class="aide">Compresse les variables et montre combien de composantes suffisent pour garder l'énergie choisie.</p>
+      <label class="ligne-modele">Énergie conservée :
+        <select id="opt-pca-energie">
+          <option value="99" selected>99 %</option>
+          <option value="95">95 % (plus compressé)</option>
+          <option value="999">99,9 % (peu de perte)</option>
+        </select>
+      </label>
+      <button id="btn-pca" class="secondaire">Appliquer la PCA</button>
+      <p class="aide" id="pca-resultat" style="margin-top:8px"></p>
+      <div id="zone-pca" style="position:relative;height:210px;display:none;margin-top:4px"><canvas id="chart-pca"></canvas></div>
+
+      <!-- réservé à la version serveur -->
       <label class="cache"><input type="checkbox" id="opt-incertitude"></label>
-      <button id="btn-pca" class="secondaire cache">Appliquer la PCA</button>
-      <img id="image-pca" class="graphique cache" alt="Analyse PCA">
+      <img id="image-pca" class="cache" alt="">
     </div>
 
     <div class="carte-ui" id="carte-quota">
