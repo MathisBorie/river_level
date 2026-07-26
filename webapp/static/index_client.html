@@ -73,8 +73,8 @@
         <span class="panneau-etat" id="etat-analyse"></span>
       </button>
       <div class="panneau-corps">
-        <p class="aide">Trouve automatiquement les meilleurs points météo (altitude, couverture, puis
-        corrélation pluie→débit + neige), télécharge l'historique et entraîne le modèle de prévision.
+        <p class="aide">D'un seul clic, River Lab repère les zones qui alimentent la rivière, récupère
+        leur météo et l'historique du débit, puis entraîne un modèle pour prévoir les prochains jours.
         <br><span id="periode-dispo">période : …</span></p>
         <label class="ligne-modele">Modèle :
           <select id="opt-modele">
@@ -344,20 +344,24 @@
 
 <!-- ================= BARRE DE JOB ================= -->
 <div id="barre-job" class="cache">
-  <div class="job-entete">
+  <div class="job-tete">
     <span id="job-titre"></span>
-    <button id="btn-arreter-job" class="danger cache">⏹️ Arrêter</button>
-    <button id="btn-plier-log" class="secondaire">Log ▾</button>
-    <button id="btn-coin-job" class="secondaire" title="Déplacer dans un autre coin">⤢</button>
-    <button id="btn-reduire-job" class="secondaire" title="Réduire / agrandir">–</button>
+    <div class="job-outils">
+      <button id="btn-coin-job" class="job-icone" title="Déplacer dans un autre coin" aria-label="Déplacer">⤢</button>
+      <button id="btn-reduire-job" class="job-icone" title="Réduire / agrandir" aria-label="Réduire">–</button>
+    </div>
   </div>
-  <div id="job-statut"></div>
   <div id="job-progres" class="cache">
-    <div class="job-progres-entete">
+    <div id="job-progres-piste"><span id="job-progres-barre"></span></div>
+    <div class="job-progres-bas">
       <span id="job-progres-phase"></span>
       <span id="job-progres-pct"></span>
     </div>
-    <div id="job-progres-piste"><span id="job-progres-barre"></span></div>
+  </div>
+  <div id="job-statut"></div>
+  <div class="job-pied">
+    <button id="btn-arreter-job" class="danger cache">Arrêter</button>
+    <button id="btn-plier-log" class="job-lien">Voir le détail</button>
   </div>
   <pre id="job-log" class="cache"></pre>
 </div>
