@@ -357,63 +357,71 @@ table.params .case { display: inline-flex; margin: 0 10px 0 0; }
 }
 
 /* ---------- barre de job ---------- */
-/* Petite fenêtre d'état, en bas à droite (n'occupe plus toute la largeur et ne
-   masque plus les panneaux). Réductible en pastille. */
+/* Fenêtre de progression : carte claire, en bas à droite, lisible et sobre. */
 #barre-job {
-  position: fixed; right: 16px; bottom: 16px; left: auto;
-  width: min(342px, calc(100vw - 32px));
-  background: rgba(19, 27, 35, 0.98); backdrop-filter: blur(6px);
-  color: #dbe5ee; padding: 11px 13px; z-index: 1200;
-  border: 1px solid rgba(255,255,255,0.12); border-top: 2px solid var(--accent);
-  border-radius: 14px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+  position: fixed; right: 18px; bottom: 18px; left: auto; top: auto; z-index: 1200;
+  width: min(360px, calc(100vw - 32px));
+  background: var(--surface); color: var(--encre);
+  border: 1px solid var(--bord); border-radius: 16px;
+  box-shadow: 0 18px 44px rgba(15, 32, 50, 0.20);
+  padding: 15px 17px 14px;
 }
-.job-entete { display: flex; align-items: center; gap: 8px; }
-#job-titre {
-  font-weight: 700; font-size: 0.8rem; flex: 1; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.job-tete { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 13px; }
+#job-titre { font-weight: 750; font-size: 0.98rem; line-height: 1.32; flex: 1; min-width: 0; }
+.job-outils { display: flex; gap: 5px; flex: none; }
+.job-icone {
+  width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+  border: 1px solid var(--bord); background: var(--surface-2); color: var(--encre-2);
+  border-radius: 9px; cursor: pointer; font-size: 0.95rem; line-height: 1;
 }
-#job-statut { font-size: 0.78rem; opacity: 0.88; margin-top: 5px; }
-#barre-job .secondaire, #barre-job .danger { padding: 4px 9px; font-size: 0.72rem; border-radius: 8px; }
-#barre-job .secondaire { background: rgba(255,255,255,0.08); color: #cfe0ea; border-color: rgba(255,255,255,0.2); }
-#barre-job .secondaire:hover { background: rgba(255,255,255,0.16); }
+.job-icone:hover { background: var(--accent-clair); color: var(--accent); border-color: var(--accent); }
 
-#job-progres { margin: 9px 0 2px; }
-.job-progres-entete { display: flex; justify-content: space-between; gap: 8px; font-size: 0.74rem; color: #cfe0ea; margin-bottom: 5px; }
-#job-progres-phase { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#job-progres-pct { font-variant-numeric: tabular-nums; opacity: 0.85; flex: none; }
-#job-progres-piste { height: 9px; border-radius: 6px; background: rgba(255,255,255,0.12); overflow: hidden; }
+#job-progres { margin: 2px 0 10px; }
+#job-progres-piste { height: 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--bord); overflow: hidden; }
 #job-progres-barre {
-  display: block; height: 100%; width: 0; border-radius: 6px;
+  display: block; height: 100%; width: 0; border-radius: 999px;
   background: linear-gradient(90deg, #17b3a3, var(--accent)); transition: width 0.4s ease;
 }
 #job-progres-piste.indetermine #job-progres-barre {
-  width: 40% !important;
-  background: linear-gradient(90deg, transparent, #17b3a3, transparent);
-  animation: balayage 1.2s ease-in-out infinite;
+  width: 42% !important;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: balayage 1.15s ease-in-out infinite;
 }
 @keyframes balayage { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+.job-progres-bas { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; }
+#job-progres-phase { font-size: 0.85rem; color: var(--encre-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#job-progres-pct { font-size: 0.85rem; font-weight: 750; color: var(--accent); font-variant-numeric: tabular-nums; flex: none; }
+
+#job-statut { font-size: 0.86rem; color: var(--encre-2); }
+
+.job-pied { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; }
+#btn-arreter-job { padding: 8px 18px; border-radius: 10px; font-weight: 650; }
+.job-lien {
+  background: none; border: none; padding: 4px 2px; cursor: pointer;
+  font-size: 0.82rem; color: var(--encre-2); text-decoration: underline; text-underline-offset: 2px;
+}
+.job-lien:hover { color: var(--accent); }
 #job-log {
-  max-height: 148px; overflow-y: auto; background: #0c141c;
-  border: 1px solid rgba(255,255,255,0.07); border-radius: var(--rayon-s);
-  padding: 10px; margin: 9px 0 2px; font-size: 0.7rem;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  line-height: 1.5; white-space: pre-wrap;
+  max-height: 150px; overflow-y: auto; background: #0f1720; color: #cfe0ea;
+  border-radius: var(--rayon-s); padding: 11px 12px; margin-top: 11px; font-size: 0.72rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; line-height: 1.55; white-space: pre-wrap;
 }
 .ligne-modele { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 0.9rem; font-weight: 600; }
 .ligne-modele select { flex: 1; }
 
 /* coin d'ancrage choisi par l'utilisateur (défaut = bas-droite) */
-#barre-job.coin-bl { left: 16px; right: auto; }
-#barre-job.coin-tr { top: calc(var(--entete-h) + 10px); bottom: auto; }
-#barre-job.coin-tl { top: calc(var(--entete-h) + 10px); bottom: auto; left: 16px; right: auto; }
+#barre-job.coin-bl { left: 18px; right: auto; }
+#barre-job.coin-tr { top: calc(var(--entete-h) + 12px); bottom: auto; }
+#barre-job.coin-tl { top: calc(var(--entete-h) + 12px); bottom: auto; left: 18px; right: auto; }
 
-/* réduit : ne reste que le titre + le % + la barre (une pastille discrète) */
-#barre-job.reduit { width: min(220px, calc(100vw - 32px)); padding: 8px 11px; }
+/* réduit : ne reste que le titre + la barre + le % */
+#barre-job.reduit { width: min(240px, calc(100vw - 32px)); padding: 12px 14px; }
+#barre-job.reduit .job-tete { margin-bottom: 9px; }
 #barre-job.reduit #job-statut,
 #barre-job.reduit #job-log,
-#barre-job.reduit #job-progres-phase,
-#barre-job.reduit #btn-plier-log { display: none !important; }
-#barre-job.reduit #job-progres { margin: 7px 0 1px; }
+#barre-job.reduit .job-pied,
+#barre-job.reduit #job-progres-phase { display: none !important; }
+#barre-job.reduit #job-progres { margin: 2px 0 0; }
 
 /* ---------- toast ---------- */
 #toast {
