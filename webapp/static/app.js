@@ -1167,7 +1167,7 @@ async function rendreInventaireStockage() {
       `<div class="bloc-station">` +
       `<div class="bloc-station-tete"><b>${s.nom || s.code}</b> <span class="ind">${s.code}</span>` +
       `<span class="bloc-station-taille">${octetsLisibles(s.octets_total)}</span>` +
-      `<button class="secondaire mini" data-export="${s.code}" title="Télécharger ce modèle dans un fichier">⤓ Exporter</button>` +
+      `<button class="secondaire mini" data-export="${s.code}" data-nom="${(s.nom || s.code).replace(/"/g, "")}" title="Télécharger ce modèle dans un fichier">⤓ Exporter</button>` +
       `<button class="secondaire danger mini" data-code="${s.code}" data-cible="station">Supprimer</button></div>` +
       (lignes.length ? `<ul class="liste-stockage">${lignes.join("")}</ul>` : "") +
       `</div>`
@@ -1178,36 +1178,24 @@ async function rendreInventaireStockage() {
     btn.addEventListener("click", () => supprimerStockage(btn.dataset.code, btn.dataset.cible));
   });
   conteneur.querySelectorAll("[data-export]").forEach((btn) => {
-    btn.addEventListener("click", () => exporterModele(btn.dataset.export));
+    btn.addEventListener("click", () => exporterModele(btn.dataset.export, btn.dataset.nom));
   });
 }
 
-// ---- partage de modèles : export vers un fichier, import depuis un fichier ----
-function _b64versBlob(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type: "application/octet-stream" });
-}
-function _bufferVersB64(buf) {
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-  return btoa(bin);
-}
-
-async function exporterModele(code) {
+// ---- partage de modèles : export/import en BINAIRE (léger, pas de base64) ----
+async function exporterModele(code, nom) {
   try {
-    const res = await api(`/api/riviere/${code}/exporter`);
-    const url = URL.createObjectURL(_b64versBlob(res.b64));
+    const bytes = await window.RIVER_EXPORT(code);   // Uint8Array
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${(res.nom || code).replace(/[^\w\-]+/g, "_")}.riverlab`;
+    a.download = `${(nom || code).replace(/[^\w\-]+/g, "_")}.riverlab`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    toast(`Modèle exporté (${octetsLisibles(res.octets)}). Tu peux envoyer ce fichier.`);
+    toast(`Modèle exporté (${octetsLisibles(blob.size)}). Tu peux envoyer ce fichier.`);
   } catch (e) {
-    toast(e.message, true);
+    toast("Export impossible : " + e.message, true);
   }
 }
 
@@ -1217,8 +1205,8 @@ $("fichier-modele").addEventListener("change", async (ev) => {
   if (!file) return;
   ev.target.value = "";  // permet de ré-importer le même fichier
   try {
-    const b64 = _bufferVersB64(await file.arrayBuffer());
-    let res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64 }) });
+    // Le buffer est « transféré » (détaché) à chaque appel -> on relit le fichier au besoin.
+    let res = await window.RIVER_IMPORT(await file.arrayBuffer(), "demander");
     if (res.conflit) {
       const infos = (x) => `${x.modeles.join(", ")} — R² <b>${x.r2}%</b>, prévoit <b>${x.horizon} j</b>`;
       const html =
@@ -1232,7 +1220,7 @@ $("fichier-modele").addEventListener("change", async (ev) => {
         { label: "Annuler", valeur: null },
       ]);
       if (!mode) return;
-      res = await api("/api/importer", { method: "POST", body: JSON.stringify({ b64, mode }) });
+      res = await window.RIVER_IMPORT(await file.arrayBuffer(), mode);
     }
     if (res.erreur) throw new Error(res.erreur);
     toast(`Importé : ${res.nom} — ${res.modeles.join(", ")} (R² ${res.r2}%, ${res.horizon} j).`);

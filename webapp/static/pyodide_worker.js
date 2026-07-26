@@ -34,7 +34,33 @@ function graverSiBesoin() {
 const initProm = init().catch((e) => postMessage({ type: "erreur-init", error: String(e) }));
 
 onmessage = async (e) => {
-  const { id, method, path, body } = e.data;
+  const { id, type } = e.data;
+  // --- chemins BINAIRES (export/import de modèle) : octets bruts, transférés
+  //     sans copie, pour ne pas saturer la mémoire (téléphones). ---
+  if (type === "exporter" || type === "importer") {
+    try {
+      await initProm;
+      if (type === "exporter") {
+        const fn = pyodide.globals.get("exporter_bytes");
+        const proxy = fn(e.data.code);
+        fn.destroy();
+        const u8 = proxy.toJs ? proxy.toJs() : proxy;
+        if (proxy.destroy) proxy.destroy();
+        postMessage({ id, ok: true, bytes: u8 }, [u8.buffer]);
+      } else {
+        const fn = pyodide.globals.get("importer_bytes");
+        const res = await fn(new Uint8Array(e.data.buffer), e.data.mode || "demander");
+        fn.destroy();
+        postMessage({ id, ok: true, result: res });   // res = chaîne JSON
+        graverSiBesoin();
+      }
+    } catch (err) {
+      postMessage({ id, ok: false, error: String((err && err.message) || err) });
+    }
+    return;
+  }
+
+  const { method, path, body } = e.data;
   try {
     await initProm;
     console.log("[worker] →", method, path);
