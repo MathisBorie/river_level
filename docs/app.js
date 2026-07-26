@@ -500,10 +500,6 @@ async function rafraichirEtat() {
 
   $("btn-mode-selection").classList.toggle("cache", !r.zones_definies);
 
-  // Pré-remplit les choix d'agrégation depuis les params sauvegardés.
-  const agg = (r.params && r.params.agregations) || {};
-  if (agg.temperature_2m) $("opt-agg-temp").value = agg.temperature_2m;
-  if (agg.snow_depth) $("opt-agg-neige").value = agg.snow_depth;
   if (r.predict_day) $("opt-predict-day").value = r.predict_day;
   if (r.past_day) $("opt-past-day").value = r.past_day;
 
@@ -717,22 +713,17 @@ $("btn-zones").addEventListener("click", async () => {
   }
 });
 
-function agregationsChoisies() {
-  return { snow_depth: $("opt-agg-neige").value, temperature_2m: $("opt-agg-temp").value };
-}
-
 function fenetreApprentissage() {
   return { start_train: $("opt-train-debut").value || null, end_train: $("opt-train-fin").value || null };
 }
 
-// Paramètres de construction des données communs au pipeline / données / points.
+// Paramètres communs au pipeline / points manuels (tous connectés au moteur).
 function paramsDonnees() {
   return {
     past_day: parseInt($("opt-past-day").value) || 20,
     predict_day: parseInt($("opt-predict-day").value) || 15,
     mode_split: $("opt-mode-split").value,
     part_test: parseFloat($("opt-part-test").value) || 0.2,
-    agregations: agregationsChoisies(),
     ...fenetreApprentissage(),
   };
 }
@@ -743,46 +734,19 @@ function seuilEnergie() {
   return v === "999" ? 99.9 : parseInt(v);
 }
 
-$("opt-methode-selection").addEventListener("change", () => {
-  const genetique = $("opt-methode-selection").value === "genetique";
-  $("ligne-genetique").style.display = genetique ? "" : "none";
-  $("ligne-deux-temps").style.display = genetique ? "none" : "";
-});
-
 $("btn-pipeline").addEventListener("click", async () => {
-  const methode = $("opt-methode-selection").value;
   const corps = {
-    methode,
     modele: $("opt-modele").value,
     seuil_energie: seuilEnergie(),
-    // paramètres de construction des données (communs aux deux méthodes)
-    past_day: parseInt($("opt-past-day").value) || 20,
-    predict_day: parseInt($("opt-predict-day").value) || 15,
-    mode_split: $("opt-mode-split").value,
-    part_test: parseFloat($("opt-part-test").value) || 0.2,
-    agregations: agregationsChoisies(),
-    ...fenetreApprentissage(),
-  };
-  if (methode === "genetique") {
-    corps.ga = {
-      taille_population: parseInt($("opt-population").value) || 20,
-      nombre_generations: parseInt($("opt-generations").value) || 50,
-      predict_day_final: parseInt($("opt-predict-day").value) || 15,
-      past_day_final: parseInt($("opt-past-day").value) || 20,
-      predict_day_opti: parseInt($("opt-ga-horizon").value) || 3,
-      past_day_opti: parseInt($("opt-past-day").value) || 20,
-      mode_split: $("opt-mode-split").value,
-      part_test: parseFloat($("opt-part-test").value) || 0.2,
-    };
-  } else {
-    corps.selection = {
+    ...paramsDonnees(),
+    selection: {
       n_preselection: parseInt($("opt-n-preselection").value) || 30,
       n_final: parseInt($("opt-n-final").value) || 5,
       poids_pluie: parseFloat($("opt-poids-pluie").value),
       poids_neige: parseFloat($("opt-poids-neige").value),
       poids_altitude: parseFloat($("opt-poids-altitude").value),
-    };
-  }
+    },
+  };
   try {
     const { job_id } = await post(`/api/riviere/${etat.code}/pipeline`, corps);
     activerPanneau("carte");   // on regarde les points apparaître en direct
