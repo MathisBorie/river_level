@@ -27,7 +27,16 @@ from pyodide.http import pyfetch
 STORE = {}      # code -> entraînement {"test","feats","targets","modeles","scores","meta"}
 ZONES = {}      # code -> bassin versant {"geojson_bassins","points_par_zone","noms_zones","surface_bv"}
 SELECTION = {}  # code -> sélection de points {"points_preselectionnes","altitudes_preselection","coords_finales"}
-VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]   # journalières natives
+VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]   # journalières natives (défaut)
+
+
+def _vars_meteo(temp_mode="moyenne"):
+    """Variables météo journalières selon le mode de température choisi. 'minmax'
+    ajoute min/max (natifs Open-Meteo) : capte le gel (min<0) et l'amplitude, sans
+    télécharger l'horaire."""
+    if temp_mode == "minmax":
+        return ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max", "snowfall_sum"]
+    return list(VARS_METEO)
 
 # ---------------------------------------------------------------- persistance
 # Le worker monte un système de fichiers IndexedDB sur /persist (le "disque" du
@@ -166,13 +175,14 @@ def _cap_archive(end, forecast):
     return min(end, hier)   # comparaison lexicographique OK sur dates ISO
 
 
-async def meteo_moyenne(coords, start, end, forecast=False):
+async def meteo_moyenne(coords, start, end, forecast=False, vars_meteo=None):
     """Météo journalière moyennée sur les points `coords` (1 requête batchée)."""
+    vm = vars_meteo or VARS_METEO
     end = _cap_archive(end, forecast)
     base = "https://api.open-meteo.com/v1/forecast" if forecast else "https://archive-api.open-meteo.com/v1/archive"
     lat = ",".join(str(c[0]) for c in coords)
     lon = ",".join(str(c[1]) for c in coords)
-    daily = ",".join(VARS_METEO)
+    daily = ",".join(vm)
     url = f"{base}?latitude={lat}&longitude={lon}&daily={daily}&start_date={start}&end_date={end}"
     data = await _fetch_json(url)
     points = data if isinstance(data, list) else [data]
@@ -184,7 +194,7 @@ async def meteo_moyenne(coords, start, end, forecast=False):
         dp["date"] = pd.to_datetime(dp["time"]).dt.normalize()
         dfs.append(dp.drop(columns=["time"]))
     if not dfs:
-        return pd.DataFrame(columns=["date"] + VARS_METEO)
+        return pd.DataFrame(columns=["date"] + list(vm))
     return pd.concat(dfs).groupby("date", as_index=False).mean()
 
 
@@ -521,16 +531,17 @@ async def _selection_finale(code, points, n_final, fenetre_annees, poids_pluie, 
 
 
 # ----------------------------------------------------------------- features
-def construire(df_eau, df_meteo, past, horizon):
+def construire(df_eau, df_meteo, past, horizon, vars_meteo=None):
+    vm = vars_meteo or VARS_METEO
     df = pd.merge(df_eau, df_meteo, on="date", how="inner").sort_values("date").reset_index(drop=True)
     feats, targets = [], []
     for i in range(1, past + 1):
         c = f"debit_J-{i}"; df[c] = df["debit_L_s"].shift(i); feats.append(c)
     for i in range(1, past + 1):
-        for v in VARS_METEO:
+        for v in vm:
             c = f"{v}_J-{i}"; df[c] = df[v].shift(i); feats.append(c)
     for i in range(0, horizon + 1):
-        for v in VARS_METEO:
+        for v in vm:
             c = f"{v}_J+{i}"; df[c] = df[v].shift(-i); feats.append(c)
     doy = df["date"].dt.dayofyear
     df["sin"] = np.sin(2 * np.pi * doy / 365.25); df["cos"] = np.cos(2 * np.pi * doy / 365.25)
@@ -598,24 +609,38 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
     return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
+def _reg_variance(X, r, cote):
+    """Régresseur de variance d'UN côté : entraîné sur les résidus positifs (cote
+    'up') ou négatifs (cote 'down'), cible = résidu². Si un côté a trop peu de
+    points, on retombe sur tous les résidus (symétrique)."""
+    masque = (r >= 0) if cote == "up" else (r < 0)
+    if masque.sum() < 50:
+        masque = np.ones(len(r), dtype=bool)
+    reg = HistGradientBoostingRegressor(max_iter=120, max_depth=4, learning_rate=0.06,
+                                        min_samples_leaf=25, l2_regularization=1.0,
+                                        early_stopping=True, validation_fraction=0.1,
+                                        n_iter_no_change=12, random_state=42)
+    reg.fit(X[masque], r[masque] ** 2)
+    return reg
+
+
 async def _fit_variance(base, Xtr, Ytr, targets, prog=None, arret=None):
-    """Incertitude, version sklearn (= entrainer_incertitude2 côté serveur) : un
-    régresseur par horizon estime E[résidu²|X] -> écart-type. Aucun TensorFlow."""
+    """Incertitude ASYMÉTRIQUE (sklearn, sans TensorFlow) : deux régresseurs de
+    variance par horizon — un pour les dépassements vers le HAUT (résidus > 0),
+    un pour vers le BAS (résidus < 0). Ex. rivière basse + pluie : grosse marge
+    au-dessus de la prévision, faible en-dessous. Renvoie {"up": [...], "down": [...]}."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
     resid = Ytr.values - base.predict(Xtr)
-    nh = len(targets); regs = []
+    nh = len(targets); ups, downs = [], []
     for i in range(nh):
         arret()
-        reg = HistGradientBoostingRegressor(max_iter=120, max_depth=4, learning_rate=0.06,
-                                            min_samples_leaf=25, l2_regularization=1.0,
-                                            early_stopping=True, validation_fraction=0.1,
-                                            n_iter_no_change=12, random_state=42)
-        reg.fit(Xtr, resid[:, i] ** 2)
-        regs.append(reg)
+        r = resid[:, i]
+        ups.append(_reg_variance(Xtr, r, "up"))
+        downs.append(_reg_variance(Xtr, r, "down"))
         prog("Estimation de l'incertitude", int((i + 1) / nh * 100), i + 1, nh)
         if i % 2 == 0:
             await asyncio.sleep(0)
-    return regs
+    return {"up": ups, "down": downs}
 
 
 # z-scores des niveaux d'intervalle de confiance
@@ -623,8 +648,10 @@ _IC_NIVEAUX = (("50", 0.674), ("95", 1.960), ("99", 2.576))
 
 
 def _sigmas_ligne(regs, X, horizons):
-    """Écart-type prédit (racine de la variance) pour une seule ligne X, par horizon."""
-    return {h: float(np.sqrt(max(1e-9, regs[h].predict(X)[0]))) for h in horizons}
+    """(sigma_haut, sigma_bas) pour une seule ligne X, par horizon."""
+    up, down = regs["up"], regs["down"]
+    return {h: (float(np.sqrt(max(1e-9, up[h].predict(X)[0]))),
+                float(np.sqrt(max(1e-9, down[h].predict(X)[0])))) for h in horizons}
 
 
 def _decouper(df, feats, targets, mode_split, part_test):
@@ -653,7 +680,7 @@ def _decouper(df, feats, targets, mode_split, part_test):
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
                     log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99,
-                    mode_split="annees_aleatoires", part_test=0.2):
+                    mode_split="annees_aleatoires", part_test=0.2, temp_mode="moyenne"):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
     arret = arret or (lambda: None)
@@ -673,14 +700,15 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     arret()
     prog("Téléchargement du débit", None); log(f"Téléchargement du débit ({s} → {e})…")
     df_eau = await debit(code, s, e)
+    vm = _vars_meteo(temp_mode)
     arret()
     prog("Téléchargement de la météo", None); log(f"Téléchargement de la météo sur {len(coords)} points…")
-    df_meteo = await meteo_moyenne(coords, s, e)
+    df_meteo = await meteo_moyenne(coords, s, e, vars_meteo=vm)
     t_dl = time.time() - t0
     await asyncio.sleep(0)
 
     prog("Préparation des données", None); log("Construction des variables explicatives…")
-    df, feats, targets = construire(df_eau, df_meteo, past, horizon)
+    df, feats, targets = construire(df_eau, df_meteo, past, horizon, vars_meteo=vm)
     n = len(df)
     if n < 50:
         raise ValueError(f"Trop peu de données exploitables ({n} lignes) sur cette période.")
@@ -710,7 +738,8 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                    # données gardées en mémoire pour ré-entraîner un autre modèle sans re-télécharger
                    "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
                    "scores": resultats, "variance": variances,
-                   "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon}}
+                   "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon,
+                            "vars_meteo": vm, "temp_mode": temp_mode}}
     return {"nom_station": infos["nom"], "lignes": int(n), "n_points": len(coords),
             "resultats": resultats, "t_dl": t_dl, "t_fit": t_fit, "total": time.time() - t0,
             "dates_test": [d.strftime("%Y-%m-%d") for d in test_df["date"]]}
@@ -790,7 +819,8 @@ async def _run_points(jid, code, body):
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"),
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
-                               part_test=float(body.get("part_test") or 0.2))
+                               part_test=float(body.get("part_test") or 0.2),
+                               temp_mode=body.get("temp_mode", "moyenne"))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé)")
@@ -891,7 +921,8 @@ async def _run_pipeline(jid, code, body):
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"),
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
-                               part_test=float(body.get("part_test") or 0.2))
+                               part_test=float(body.get("part_test") or 0.2),
+                               temp_mode=body.get("temp_mode", "moyenne"))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé sur cet appareil)")
@@ -931,15 +962,15 @@ def backtest(code, modele, date_str, nb_jours=None, hybride=True):
     pts = [{"date": d.strftime("%Y-%m-%d"),
             "prev": float(v) / D, "reel": float(r) / D}
            for d, v, r in zip(dates, [debit0] + list(pred), [debit0] + list(vrai))]
-    # intervalles de confiance (si l'incertitude a été apprise pour ce modèle)
+    # intervalles de confiance (si l'incertitude asymétrique a été apprise)
     regs = st.get("variance", {}).get(modele) if hybride else None
     hybride = False
-    if regs:
+    if isinstance(regs, dict):   # dict {up, down} = nouveau format asymétrique
         hybride = True
-        sig = _sigmas_ligne(regs, X, range(h_max + 1))
+        sig = _sigmas_ligne(regs, X, range(h_max + 1))   # sig[h] = (haut, bas)
         for niv, z in _IC_NIVEAUX:
-            bas = [debit0] + [max(0.0, pred[h] - z * sig[h]) for h in range(h_max + 1)]
-            haut = [debit0] + [pred[h] + z * sig[h] for h in range(h_max + 1)]
+            bas = [debit0] + [max(0.0, pred[h] - z * sig[h][1]) for h in range(h_max + 1)]
+            haut = [debit0] + [pred[h] + z * sig[h][0] for h in range(h_max + 1)]
             for k, p in enumerate(pts):
                 p[f"ic{niv}_bas"] = float(bas[k]) / D
                 p[f"ic{niv}_haut"] = float(haut[k]) / D
@@ -958,6 +989,7 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
         return {"erreur": "modèle non entraîné"}
     feats, meta = st["feats"], st["meta"]
     coords, past, horizon = meta["coords"], meta["past"], meta["horizon"]
+    vm = meta.get("vars_meteo", VARS_METEO)
     today = pd.Timestamp.now().normalize()
     start = (today - pd.Timedelta(days=past + 7)).strftime("%Y-%m-%d")
 
@@ -980,7 +1012,7 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
     for cap in (15, 13, 11, 9, 7):
         end = (today + pd.Timedelta(days=cap)).strftime("%Y-%m-%d")
         try:
-            df_meteo = await meteo_moyenne(coords, start, end, forecast=True)
+            df_meteo = await meteo_moyenne(coords, start, end, forecast=True, vars_meteo=vm)
             if df_meteo is not None and not df_meteo.empty:
                 break
         except Exception:
@@ -996,10 +1028,10 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
         di = date_J0 - pd.Timedelta(days=i)
         f[f"debit_J-{i}"] = float(serie.loc[di]) if di in serie.index and pd.notna(serie.loc[di]) else debit0
     for i in range(1, past + 1):
-        for v in VARS_METEO:
+        for v in vm:
             f[f"{v}_J-{i}"] = float(dm.loc[date_J0 - pd.Timedelta(days=i), v])
     for i in range(0, horizon + 1):
-        for v in VARS_METEO:
+        for v in vm:
             f[f"{v}_J+{i}"] = float(dm.loc[date_J0 + pd.Timedelta(days=i), v])
     doy = date_J0.dayofyear
     f["sin"] = math.sin(2 * math.pi * doy / 365.25); f["cos"] = math.cos(2 * math.pi * doy / 365.25)
@@ -1014,18 +1046,18 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
     for h in horizons:
         d = date_J0 + pd.Timedelta(days=h)
         points.append({"date": d.strftime("%Y-%m-%d"), "prev": float(pred[h]) / D})
-    # intervalles de confiance (si l'incertitude a été apprise pour ce modèle)
+    # intervalles de confiance (si l'incertitude asymétrique a été apprise)
     regs = st.get("variance", {}).get(modele) if hybride else None
     hybride = False
-    if regs:
+    if isinstance(regs, dict):   # dict {up, down} = nouveau format asymétrique
         hybride = True
-        sig = _sigmas_ligne(regs, X, horizons)
+        sig = _sigmas_ligne(regs, X, horizons)   # sig[h] = (haut, bas)
         for niv, z in _IC_NIVEAUX:
             points[0][f"ic{niv}_bas"] = debit0 / D
             points[0][f"ic{niv}_haut"] = debit0 / D
             for k, h in enumerate(horizons, start=1):
-                points[k][f"ic{niv}_bas"] = max(0.0, pred[h] - z * sig[h]) / D
-                points[k][f"ic{niv}_haut"] = (pred[h] + z * sig[h]) / D
+                points[k][f"ic{niv}_bas"] = max(0.0, pred[h] - z * sig[h][1]) / D
+                points[k][f"ic{niv}_haut"] = (pred[h] + z * sig[h][0]) / D
     sc = st["scores"].get(modele, {})
     return {"pivot": today.strftime("%Y-%m-%d"), "hybride": hybride,
             "observe": observe, "points": points, "modele": modele,
@@ -1093,7 +1125,8 @@ async def etat(code):
     if st:
         variance = st.get("variance", {})
         for nom, r in st.get("scores", {}).items():
-            modeles.append({"nom": nom, "score": r["r2"], "espace": "brut", "hybride": nom in variance})
+            modeles.append({"nom": nom, "score": r["r2"], "espace": "brut",
+                            "hybride": isinstance(variance.get(nom), dict)})
     # points finaux : la sélection auto/manuelle si elle existe, sinon ceux de l'entraînement
     coords_finales = None
     if sel and sel.get("coords_finales"):
