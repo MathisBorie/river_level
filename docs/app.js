@@ -724,6 +724,7 @@ function paramsDonnees() {
     predict_day: parseInt($("opt-predict-day").value) || 15,
     mode_split: $("opt-mode-split").value,
     part_test: parseFloat($("opt-part-test").value) || 0.2,
+    temp_mode: $("opt-temp-mode").value,
     ...fenetreApprentissage(),
   };
 }
