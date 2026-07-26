@@ -81,6 +81,7 @@
             <option value="gradient_boosting" selected>Gradient Boosting (recommandé)</option>
             <option value="ridge">Ridge</option>
             <option value="lineaire">Régression linéaire</option>
+            <option value="lineaire_pca">Linéaire (PCA)</option>
           </select>
         </label>
         <button id="btn-pipeline" class="primaire grand">Analyser cette rivière</button>
@@ -276,6 +277,7 @@
         <button class="secondaire btn-un-modele" data-modele="gradient_boosting">Gradient Boosting</button>
         <button class="secondaire btn-un-modele" data-modele="ridge">Ridge</button>
         <button class="secondaire btn-un-modele" data-modele="lineaire">Régression linéaire</button>
+        <button class="secondaire btn-un-modele" data-modele="lineaire_pca">Linéaire (PCA)</button>
       </div>
 
       <table class="params">
@@ -286,6 +288,7 @@
               <label class="case"><input type="checkbox" class="case-modele" value="gradient_boosting" checked> Gradient Boosting</label>
               <label class="case"><input type="checkbox" class="case-modele" value="ridge" checked> Ridge</label>
               <label class="case"><input type="checkbox" class="case-modele" value="lineaire" checked> Régression linéaire</label>
+              <label class="case"><input type="checkbox" class="case-modele" value="lineaire_pca"> Linéaire (PCA)</label>
             </td>
           </tr>
         </tbody>
