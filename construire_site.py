@@ -16,7 +16,7 @@ OVERLAY = '''<body>
 <div id="overlay-chargement">
   <div class="spin"></div>
   <div class="titre">🌊 River Lab</div>
-  <div class="msg">Démarrage du moteur dans ton navigateur (Python + scikit-learn)…<br>Le 1er chargement récupère ~15 Mo (mis en cache ensuite).</div>
+  <div class="msg">Prévision du débit des rivières françaises</div>
 </div>'''
 
 # 1) index.html : ajoute l'overlay + le boot client, et rend les chemins RELATIFS

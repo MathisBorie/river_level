@@ -277,7 +277,10 @@ function reinitialiserAffichageStation() {
   // Vide tout ce qui vient de la station précédente : graphiques, tableaux, dates.
   $("image-pca").classList.add("cache");
   $("image-pca").removeAttribute("src");
-  ["chart-prevision", "chart-backtest", "chart-historique"].forEach(detruireChart);
+  ["chart-prevision", "chart-backtest", "chart-historique", "chart-pca"].forEach(detruireChart);
+  if (chartPca) { chartPca = null; }
+  $("zone-pca").style.display = "none";
+  $("pca-resultat").innerHTML = "";
   ["vide-prevision", "vide-backtest", "vide-historique"].forEach((id) => { const e = $(id); if (e) e.style.display = ""; });
   ["fiab-prevision", "fiab-backtest"].forEach((id) => { const e = $(id); if (e) { e.classList.add("cache"); e.innerHTML = ""; } });
   document.querySelectorAll(".popover").forEach((p) => p.classList.add("cache"));
@@ -751,6 +754,7 @@ $("btn-pipeline").addEventListener("click", async () => {
   const corps = {
     methode,
     modele: $("opt-modele").value,
+    seuil_energie: seuilEnergie(),
     // paramètres de construction des données (communs aux deux méthodes)
     past_day: parseInt($("opt-past-day").value) || 20,
     predict_day: parseInt($("opt-predict-day").value) || 15,
@@ -800,14 +804,47 @@ $("btn-donnees").addEventListener("click", async () => {
   }
 });
 
+let chartPca = null;
 $("btn-pca").addEventListener("click", async () => {
+  $("btn-pca").disabled = true;
   try {
-    const { job_id } = await post(`/api/riviere/${etat.code}/pca`, { seuil_energie: seuilEnergie() });
-    suivreJob(job_id, `Analyse PCA (${seuilEnergie()} % d'énergie)`);
+    const res = await api(`/api/riviere/${etat.code}/pca?seuil=${seuilEnergie()}`);
+    dessinerPca(res);
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    $("btn-pca").disabled = false;
   }
 });
+
+function dessinerPca(res) {
+  $("pca-resultat").innerHTML =
+    `<b>${res.n_composantes}</b> composantes suffisent pour garder <b>${res.energie}%</b> de l'information ` +
+    `(sur ${res.n_features} variables) — soit ${Math.round((1 - res.n_composantes / res.n_features) * 100)}% de compression.`;
+  $("zone-pca").style.display = "";
+  if (chartPca) chartPca.destroy();
+  chartPca = new Chart($("chart-pca"), {
+    type: "line",
+    data: {
+      labels: res.variance_cumulee.map((_, i) => i + 1),
+      datasets: [{
+        data: res.variance_cumulee, borderColor: "#0f9488",
+        backgroundColor: "rgba(15,148,136,.12)", fill: true, pointRadius: 0, borderWidth: 2, tension: 0.2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { title: (t) => `${t[0].label} composantes`, label: (c) => `${c.parsed.y.toFixed(1)} % d'énergie` } },
+      },
+      scales: {
+        x: { title: { display: true, text: "nombre de composantes" }, ticks: { maxTicksLimit: 10 } },
+        y: { min: 0, max: 100, title: { display: true, text: "énergie conservée (%)" } },
+      },
+    },
+  });
+}
 
 $("btn-entrainer").addEventListener("click", async () => {
   const modeles = Array.from(document.querySelectorAll(".case-modele:checked")).map((c) => c.value);
