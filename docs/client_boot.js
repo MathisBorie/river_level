@@ -14,7 +14,29 @@
     const cb = enAttente[d.id];
     if (!cb) return;
     delete enAttente[d.id];
-    if (d.ok) cb.resolve(d.result); else cb.reject(new Error(d.error));
+    if (d.ok) cb.resolve(d.bytes !== undefined ? d.bytes : d.result);
+    else cb.reject(new Error(d.error));
+  };
+
+  // Export/import de modèle en BINAIRE (octets bruts, pas de base64) — léger en mémoire.
+  window.RIVER_EXPORT = async (code) => {
+    await pret;
+    const id = ++seq;
+    return new Promise((resolve, reject) => {
+      enAttente[id] = { resolve, reject };
+      worker.postMessage({ id, type: "exporter", code });
+    });
+  };
+  window.RIVER_IMPORT = async (arrayBuffer, mode) => {
+    await pret;
+    const id = ++seq;
+    const brut = await new Promise((resolve, reject) => {
+      enAttente[id] = { resolve, reject };
+      worker.postMessage({ id, type: "importer", buffer: arrayBuffer, mode }, [arrayBuffer]);
+    });
+    const data = JSON.parse(brut);
+    if (data && data.erreur) throw new Error(data.erreur);
+    return data;
   };
 
   window.RIVER_BACKEND = async (method, path, body) => {

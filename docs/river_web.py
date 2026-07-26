@@ -141,12 +141,46 @@ def _resume_modele(store):
             "annees_test": store["meta"].get("annees_test", [])}
 
 
-def importer(b64, mode="demander"):
-    """Charge un fichier .riverlab reçu d'un autre utilisateur. Si un modèle existe
-    déjà pour cette station, renvoie un 'conflit' pour laisser choisir : remplacer,
-    garder le meilleur (R²), ou garder les deux (fusion des modèles compatibles)."""
+def exporter_bytes(code):
+    """Comme exporter() mais renvoie les OCTETS bruts (pas de base64) : le worker
+    les transfère tels quels au thread principal (zéro copie), pour ne pas saturer
+    la mémoire sur téléphone."""
+    if code not in STORE:
+        raise ValueError("Aucun modèle à exporter pour cette station.")
+    paquet = {"format": "riverlab-1", "code": code, "store": _store_leger(STORE.get(code)),
+              "zones": ZONES.get(code), "selection": SELECTION.get(code)}
+    buf = io.BytesIO()
+    joblib.dump(paquet, buf, compress=3)
+    return buf.getvalue()
+
+
+def importer_bytes(donnees, mode="demander"):
+    """Comme importer() mais reçoit les octets bruts (Uint8Array JS) ; renvoie une
+    chaîne JSON (le worker la transmet telle quelle au thread principal)."""
     try:
-        paquet = joblib.load(io.BytesIO(base64.b64decode(b64)))
+        if hasattr(donnees, "to_py"):
+            donnees = donnees.to_py()
+        b = bytes(donnees)
+    except Exception as ex:
+        return _json.dumps({"erreur": f"Données illisibles : {ex}"})
+    return _json.dumps(_importer_paquet(b, mode))
+
+
+def importer(b64, mode="demander"):
+    """Variante base64 (compat). Préférer importer_bytes()."""
+    try:
+        b = base64.b64decode(b64)
+    except Exception as e:
+        return {"erreur": f"Fichier illisible : {e}"}
+    return _importer_paquet(b, mode)
+
+
+def _importer_paquet(b, mode="demander"):
+    """Charge un modèle .riverlab (octets). Si un modèle existe déjà pour cette
+    station, renvoie un 'conflit' pour laisser choisir : remplacer, garder le
+    meilleur (R²), ou garder les deux (fusion des modèles compatibles)."""
+    try:
+        paquet = joblib.load(io.BytesIO(b))
     except Exception as e:
         return {"erreur": f"Fichier illisible ou corrompu : {e}"}
     if not isinstance(paquet, dict) or paquet.get("format") != "riverlab-1" or "code" not in paquet:

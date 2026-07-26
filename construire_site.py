@@ -16,7 +16,8 @@ OVERLAY = '''<body>
 <div id="overlay-chargement">
   <div class="spin"></div>
   <div class="titre">🌊 River Lab</div>
-  <div class="msg">Prévision du débit des rivières françaises</div>
+  <div class="msg">Prévision du débit des rivières françaises<br>
+    <span class="msg-note">Les débits prévus sont des estimations de modèles, pas la réalité.</span></div>
 </div>'''
 
 # 1) index.html : ajoute l'overlay + le boot client, et rend les chemins RELATIFS
