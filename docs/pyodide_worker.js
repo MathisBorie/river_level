@@ -4,15 +4,32 @@ importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js");
 
 let pyodide = null;
 let traiterFn = null; // proxy de la fonction Python traiter(), appelée directement
+let besoinSyncFn = null;
 
 async function init() {
   pyodide = await loadPyodide();
   await pyodide.loadPackage(["numpy", "pandas", "scikit-learn"]);
+  // « Disque » persistant du navigateur (IndexedDB) monté sur /persist :
+  // les modèles + points survivent d'une visite à l'autre.
+  try {
+    pyodide.FS.mkdir("/persist");
+    pyodide.FS.mount(pyodide.FS.filesystems.IDBFS, {}, "/persist");
+    await new Promise((res) => pyodide.FS.syncfs(true, () => res()));  // charge l'existant
+  } catch (e) {
+    console.warn("[worker] stockage persistant indisponible :", e);
+  }
   const urlPy = new URL("river_web.py?v=" + Date.now(), self.location.href);
   const src = await (await fetch(urlPy)).text();
-  await pyodide.runPythonAsync(src);
+  await pyodide.runPythonAsync(src);   // river_web.py recharge les stations sauvegardées
   traiterFn = pyodide.globals.get("traiter");
+  besoinSyncFn = pyodide.globals.get("besoin_sync");
   postMessage({ type: "pret" });
+}
+
+function graverSiBesoin() {
+  try {
+    if (besoinSyncFn && besoinSyncFn()) pyodide.FS.syncfs(false, () => {});
+  } catch (e) { /* pas bloquant */ }
 }
 const initProm = init().catch((e) => postMessage({ type: "erreur-init", error: String(e) }));
 
@@ -26,6 +43,7 @@ onmessage = async (e) => {
     const res = await traiterFn(method, path, body ? JSON.stringify(body) : null);
     console.log("[worker] ←", method, path, "(" + String(res).length + " o)");
     postMessage({ id, ok: true, result: res });
+    graverSiBesoin();   // grave dans IndexedDB si une station a été sauvegardée
   } catch (err) {
     console.error("[worker] échec", method, path, err);
     postMessage({ id, ok: false, error: String((err && err.message) || err) });

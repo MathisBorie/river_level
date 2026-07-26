@@ -10,14 +10,17 @@ Le JS appelle les fonctions `async` d'ici ; l'état entraîné reste en mémoire
 Python (STORE) le temps de la session.
 """
 import time
+import os
 import math
 import asyncio
 import warnings
 warnings.filterwarnings("ignore")  # silence les notices pandas (fragmentation, to_datetime)
 import numpy as np
 import pandas as pd
+import joblib
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score
 from pyodide.http import pyfetch
 
@@ -25,6 +28,91 @@ STORE = {}      # code -> entraînement {"test","feats","targets","modeles","sco
 ZONES = {}      # code -> bassin versant {"geojson_bassins","points_par_zone","noms_zones","surface_bv"}
 SELECTION = {}  # code -> sélection de points {"points_preselectionnes","altitudes_preselection","coords_finales"}
 VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]   # journalières natives
+
+# ---------------------------------------------------------------- persistance
+# Le worker monte un système de fichiers IndexedDB sur /persist (le "disque" du
+# navigateur). On y sauvegarde modèles + points par station (joblib) pour qu'ils
+# survivent d'une visite à l'autre. Après une écriture, on lève un drapeau : le
+# worker appelle FS.syncfs() pour graver vraiment dans IndexedDB.
+_PERSIST = "/persist"
+_A_SYNCHRONISER = [False]
+
+
+def besoin_sync():
+    """Appelé par le worker après chaque requête : True s'il faut graver le FS."""
+    v = _A_SYNCHRONISER[0]; _A_SYNCHRONISER[0] = False
+    return v
+
+
+def _sauver(code):
+    """Écrit modèles + zones + sélection d'une station sur le disque du navigateur."""
+    try:
+        os.makedirs(_PERSIST, exist_ok=True)
+        paquet = {"store": STORE.get(code), "zones": ZONES.get(code), "selection": SELECTION.get(code)}
+        joblib.dump(paquet, f"{_PERSIST}/{code}.joblib", compress=3)
+        _A_SYNCHRONISER[0] = True
+    except Exception as e:
+        print("[persist] échec sauvegarde", code, ":", e)
+
+
+def _charger_tout():
+    """Recharge en mémoire toutes les stations sauvegardées (au démarrage)."""
+    if not os.path.isdir(_PERSIST):
+        return
+    for f in os.listdir(_PERSIST):
+        if not f.endswith(".joblib"):
+            continue
+        code = f[:-len(".joblib")]
+        try:
+            p = joblib.load(f"{_PERSIST}/{f}")
+            if p.get("store"): STORE[code] = p["store"]
+            if p.get("zones"): ZONES[code] = p["zones"]
+            if p.get("selection"): SELECTION[code] = p["selection"]
+        except Exception as e:
+            print("[persist] échec chargement", code, ":", e)
+
+
+def _inventaire():
+    """Liste des stations stockées sur cet appareil (pour le gestionnaire)."""
+    total, stations = 0, []
+    for code in sorted(set(list(STORE.keys()) + list(ZONES.keys()))):
+        chemin = f"{_PERSIST}/{code}.joblib"
+        octets = os.path.getsize(chemin) if os.path.exists(chemin) else 0
+        total += octets
+        st = STORE.get(code)
+        modeles = []
+        if st:
+            noms = list(st.get("scores", {}).keys())
+            par = octets // max(1, len(noms)) if noms else 0
+            for nom in noms:
+                modeles.append({"nom": nom, "octets": par, "score": st["scores"][nom]["r2"]})
+        nom_station = (st["meta"]["nom"] if st else None) or (ZONES.get(code, {}) and code) or code
+        stations.append({"code": code, "nom": nom_station, "octets_total": octets,
+                         "octets_test": 0, "octets_travail": 0, "modeles": modeles})
+    return {"octets_total": total, "stations": stations}
+
+
+def _supprimer(code, cible):
+    chemin = f"{_PERSIST}/{code}.joblib"
+    octets = os.path.getsize(chemin) if os.path.exists(chemin) else 0
+    if cible == "station":
+        STORE.pop(code, None); ZONES.pop(code, None); SELECTION.pop(code, None)
+        if os.path.exists(chemin):
+            os.remove(chemin)
+        _A_SYNCHRONISER[0] = True
+        return {"libelle": f"station {code}", "octets_liberes": octets}
+    if cible.startswith("modele:"):
+        nom = cible.split(":", 1)[1]
+        st = STORE.get(code)
+        libere = octets // max(1, len(st.get("scores", {}))) if st else 0
+        if st and nom in st.get("modeles", {}):
+            st["modeles"].pop(nom, None); st["scores"].pop(nom, None)
+            if st["modeles"]:
+                _sauver(code)
+            else:  # plus aucun modèle : on retire la station
+                return _supprimer(code, "station")
+        return {"libelle": f"modèle {nom}", "octets_liberes": libere}
+    return {"libelle": cible, "octets_liberes": 0}
 
 
 async def _fetch_json(url, essais=4):
@@ -467,11 +555,19 @@ class MultiGB:
 
 
 # ----------------------------------------------------------------- entraînement
-NOMS_MODELE = {"ridge": "Ridge", "lineaire": "Régression linéaire", "gradient_boosting": "Gradient Boosting"}
-MODELES_DISPO = ("gradient_boosting", "ridge", "lineaire")
+NOMS_MODELE = {"ridge": "Ridge", "lineaire": "Régression linéaire",
+               "gradient_boosting": "Gradient Boosting", "lineaire_pca": "Linéaire (PCA)"}
+MODELES_DISPO = ("gradient_boosting", "ridge", "lineaire", "lineaire_pca")
 
 
-async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, idx=0, nb=1):
+class ModelePCA:
+    """Régression linéaire sur les features compressées par PCA (sklearn, sans
+    TensorFlow). Le proxy .predict transforme X avant de prédire."""
+    def __init__(self, pca, lin): self.pca = pca; self.lin = lin
+    def predict(self, X): return self.lin.predict(self.pca.transform(X))
+
+
+async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, idx=0, nb=1, seuil_pca=99):
     """Entraîne UN modèle et renvoie (objet, {r2, detail}). Le GB (1/horizon)
     rend la main régulièrement pour que le suivi reste fluide."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
@@ -479,6 +575,11 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
         m = Ridge(alpha=10000.0).fit(Xtr, Ytr)
     elif nom == "lineaire":
         m = LinearRegression().fit(Xtr, Ytr)
+    elif nom == "lineaire_pca":
+        energie = min(0.999, max(0.5, seuil_pca / 100.0))
+        pca = PCA(n_components=energie, svd_solver="full").fit(Xtr)
+        lin = LinearRegression().fit(pca.transform(Xtr), Ytr)
+        m = ModelePCA(pca, lin)
     elif nom == "gradient_boosting":
         ests = []; Y = Ytr.values; nh = len(targets)
         for h in range(nh):
@@ -604,6 +705,7 @@ async def _run_zones(jid, code, body):
         res = await determiner_zones(code, log, prog, arret,
                                      n_grille=int(body.get("n_points_grille", 15)),
                                      max_par_zone=int(body.get("max_points_par_zone", 25)))
+        _sauver(code)
         job["resultat"] = res
         job["statut"] = "termine"
     except _Arret:
@@ -632,7 +734,8 @@ async def _run_points(jid, code, body):
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"))
         sc = info["resultats"].get(modele, {})
-        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} %")
+        _sauver(code)
+        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé)")
         job["resultat"] = {"score_gradient_boosting": sc.get("r2"), "coords_finales": [list(p) for p in pts]}
         job["statut"] = "termine"
     except _Arret:
@@ -672,7 +775,8 @@ async def _run_ajouter(jid, code, noms):
         if not noms:
             raise ValueError("Aucun modèle valide à entraîner.")
         job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret)
-        log("✅ Terminé.")
+        _sauver(code)
+        log("✅ Terminé (sauvegardé sur cet appareil).")
         job["statut"] = "termine"
     except _Arret:
         log("⏹️ Arrêté à la demande."); job["statut"] = "arrete"
@@ -727,7 +831,8 @@ async def _run_pipeline(jid, code, body):
                                log=log, prog=prog, arret=arret,
                                debut_str=body.get("start_train"), fin_str=body.get("end_train"))
         sc = info["resultats"].get(modele, {})
-        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} %")
+        _sauver(code)
+        log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé sur cet appareil)")
         job["resultat"] = {"score_gradient_boosting": sc.get("r2"),
                            "coords_finales": [list(c) for c in coords],
                            "temps_reponse_jours": diag["temps_reponse_jours"]}
@@ -968,6 +1073,10 @@ async def _traiter(method, path, body):
         return _json.dumps(quota_zero())
     if p in ("/api/quota/limites", "/api/quota/reinitialiser") and method == "POST":
         return _json.dumps({"ok": True})   # quota géré par le navigateur : réglages sans effet
+    if p == "/api/stockage":
+        return _json.dumps(_inventaire())
+    if p == "/api/stockage/supprimer" and method == "POST":
+        return _json.dumps(_supprimer(body.get("code"), body.get("cible", "station")))
 
     import re
     m = re.match(r"^/api/riviere/([^/]+)$", p)
@@ -1021,6 +1130,10 @@ async def _traiter(method, path, body):
         jid = _job_nouveau("entrainer", m.group(1))
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or []))
         return _json.dumps({"job_id": jid})
+    m = re.match(r"^/api/riviere/([^/]+)/sauvegarder$", p)
+    if m and method == "POST":
+        _sauver(m.group(1))
+        return _json.dumps({"ok": True})
     m = re.match(r"^/api/jobs/(\d+)$", p)
     if m:
         job = JOBS.get(int(m.group(1)))
@@ -1045,3 +1158,7 @@ async def traiter(method, path, body):
         import traceback
         return _json.dumps({"erreur": f"{type(e).__name__}: {e}",
                             "trace": traceback.format_exc()[-1200:]})
+
+
+# Recharge les stations sauvegardées (le worker a déjà monté + synchronisé /persist).
+_charger_tout()
