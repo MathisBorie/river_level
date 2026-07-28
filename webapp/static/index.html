@@ -250,9 +250,15 @@
       </div>
 
       <div class="champ-reglage">
-        <label>Calcul parallèle</label>
+        <label>Calcul parallèle (Monte Carlo)</label>
+        <div class="champ-controle">
+          <select id="opt-parallele">
+            <option value="off" selected>Désactivé (défaut)</option>
+            <option value="on">Activé — expérimental</option>
+          </select>
+        </div>
         <div class="champ-controle"><span id="infos-appareil" class="champ-aide">détection…</span></div>
-        <span class="champ-aide">Le calcul (réseaux, Gradient Boosting) tourne sur un seul cœur dans le navigateur. Le parallélisme demanderait plusieurs instances Pyodide (mémoire + démarrage). Voici ce que ton appareil pourrait se permettre.</span>
+        <span class="champ-aide">Expérimental : entraîne les réseaux Monte Carlo sur plusieurs cœurs (plusieurs instances Pyodide). Gain seulement sur machine costaude ; repli automatique en séquentiel si ça coince. Le calcul reste sinon sur un seul cœur (Pyodide/navigateur).</span>
       </div>
 
       <div class="champ-reglage">

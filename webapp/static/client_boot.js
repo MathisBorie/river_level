@@ -47,6 +47,10 @@
     return data;
   };
 
+  // Configure le pool de calcul parallèle (0 = désactivé). Envoyé au worker qui
+  // gère les sous-workers ; sans effet tant que Python ne le lit pas.
+  window.RIVER_CONFIG_POOL = (taille) => worker.postMessage({ type: "config-pool", taille: taille | 0 });
+
   window.RIVER_BACKEND = async (method, path, body) => {
     await pret;
     const id = ++seq;
