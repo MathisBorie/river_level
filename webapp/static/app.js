@@ -224,8 +224,9 @@ function rendreFiabilite(elemId, data) {
   let couv = "";
   if (data.couverture && data.couverture["95"] != null) {
     const c = data.couverture;
-    const note = c.note != null ? ` · <b title="Qualité des intervalles : précision ET finesse, 0-100">note ${c.note}/100</b>` : "";
-    couv = ` <span class="details-r2" title="Couverture réelle mesurée sur des données jamais vues (cibles 50/95/99).">· IC 95% couvre <b>${c["95"]}%</b>${note}</span>`;
+    const note = c.note != null ? ` · <b title="Qualité des intervalles sur tous les horizons : précision ET finesse, 0-100">note ${c.note}/100</b>` : "";
+    const noteP = c.note_proche != null ? ` <span title="Même note mais sur la 1re semaine (J+1→J+7), sans être plombée par les horizons lointains">(J+1→7 : ${c.note_proche})</span>` : "";
+    couv = ` <span class="details-r2" title="Couverture réelle mesurée sur des données jamais vues (cibles 50/95/99).">· IC 95% couvre <b>${c["95"]}%</b>${note}${noteP}</span>`;
   }
   el.innerHTML = `<span class="details-r2">${nom} — fiabilité globale</span> ` +
     `<span class="badge-r2 ${classeR2(pct)}">R² ${pct}%</span> ${detail}${couv}`;
@@ -1058,7 +1059,9 @@ function rendreModeles() {
       r.modeles.map((m) => {
         const cov = m.couverture || {};
         const ic = cov["95"] != null ? `${cov["95"]}%` : "—";
-        const note = cov.note != null ? `${cov.note}` : "—";
+        const note = cov.note != null
+          ? `${cov.note}${cov.note_proche != null ? ` <span class="aide" title="1re semaine J+1→J+7">(${cov.note_proche})</span>` : ""}`
+          : "—";
         return `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(0)} %</b></td>` +
           `<td>${ic}</td><td>${note}</td><td class="actions-modele">` +
           (r.donnees_en_memoire ? `<button class="mini" data-incert="${m.nom}" title="Ré-entraîner l'incertitude de ce modèle">🎯</button>` : "") +
