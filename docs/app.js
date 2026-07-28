@@ -362,6 +362,7 @@ function reinitialiserAffichageStation() {
 
 window.ouvrirStation = async function (code, depuisHistorique) {
   etat.code = code;
+  etat.recordCharge = false;
   if (!depuisHistorique) history.pushState({ station: code }, "", "#station=" + code);
   reinitialiserAffichageStation();
   $("vue-stations").classList.add("cache");
@@ -371,6 +372,7 @@ window.ouvrirStation = async function (code, depuisHistorique) {
   activerPanneau(etat.panneauActif || "carte");
   await rafraichirEtat();
   chargerPeriodeDisponible();
+  rendreRecord(code);
   compterVue("station/" + code, (etat.riviere && etat.riviere.nom_station) || code);
 };
 
@@ -812,6 +814,64 @@ function seuilEnergie() {
   return v === "999" ? 99.9 : parseInt(v);
 }
 
+// ---------------------------------------------- meilleur score LOCAL (par station + horizon)
+// Stocké dans le navigateur (localStorage) : aucun partage entre utilisateurs
+// pour l'instant. Un bouton propose de recharger les réglages du meilleur essai.
+const CHAMPS_PARAMS = ["opt-modele", "opt-predict-day", "opt-past-day", "opt-temp-mode", "opt-mode-split",
+  "opt-part-sigma", "opt-part-eval", "opt-var-modele", "opt-n-preselection", "opt-n-final",
+  "opt-poids-pluie", "opt-poids-neige", "opt-poids-altitude", "opt-pca-energie"];
+let PARAMS_DEFAUT = null;   // valeurs initiales des champs, capturées au chargement
+
+function snapshotParams() {
+  const s = {};
+  for (const id of CHAMPS_PARAMS) { const el = $(id); if (el) s[id] = el.value; }
+  return s;
+}
+function appliquerParams(snap) {
+  for (const id of CHAMPS_PARAMS) { const el = $(id); if (el && snap[id] != null) el.value = snap[id]; }
+  estimerCout();
+}
+function lireRecords() {
+  try { return JSON.parse(localStorage.getItem("riverlab:records") || "{}"); } catch (e) { return {}; }
+}
+function cleRecord(code, horizon) { return `${code}|${horizon}`; }
+
+// Appelé à la fin d'un entraînement : mémorise les réglages si le score bat le record.
+function enregistrerRecord(code, horizon, score) {
+  if (!code || score == null || !isFinite(score)) return;
+  const recs = lireRecords();
+  const cle = cleRecord(code, horizon);
+  if (!recs[cle] || score > recs[cle].score) {
+    recs[cle] = { score, params: snapshotParams(), date: new Date().toISOString().slice(0, 10) };
+    try { localStorage.setItem("riverlab:records", JSON.stringify(recs)); } catch (e) {}
+  }
+  rendreRecord(code);
+}
+
+// Affiche le bouton "meilleur score" pour la station + l'horizon courants (s'il existe).
+function rendreRecord(code) {
+  const el = $("record-params");
+  if (!el) return;
+  const horizon = parseInt($("opt-predict-day").value) || 15;
+  const rec = lireRecords()[cleRecord(code, horizon)];
+  if (!rec) { el.classList.add("cache"); el.innerHTML = ""; return; }
+  el.classList.remove("cache");
+  if (etat.recordCharge) {
+    el.innerHTML = `<button class="mini" id="btn-record-defaut">↩ Revenir aux réglages par défaut</button>`;
+    $("btn-record-defaut").onclick = () => {
+      if (PARAMS_DEFAUT) appliquerParams(PARAMS_DEFAUT);
+      etat.recordCharge = false; rendreRecord(code);
+    };
+  } else {
+    el.innerHTML = `<button class="mini" id="btn-record-charger" title="Charge les réglages qui ont donné ce score sur cet appareil, puis relance l'analyse">` +
+      `🏆 Meilleur ici : R² ${(rec.score * 100).toFixed(0)} % à J+${horizon} — charger ces réglages</button>`;
+    $("btn-record-charger").onclick = () => {
+      appliquerParams(rec.params); etat.recordCharge = true; rendreRecord(code);
+      toast("Réglages du meilleur score chargés. Clique sur « Analyser cette rivière » pour relancer.");
+    };
+  }
+}
+
 $("btn-pipeline").addEventListener("click", async () => {
   const corps = {
     modele: $("opt-modele").value,
@@ -1016,6 +1076,11 @@ async function bouclePollingJob() {
   etat.jobId = null;
   rendreQuota();
   await rafraichirEtat();
+  // mémorise localement les réglages si ce nouvel entraînement bat le record de la station+horizon
+  if (job.statut === "termine" && etat.riviere && (etat.riviere.modeles || []).length) {
+    const best = Math.max(...etat.riviere.modeles.map((m) => m.score || 0));
+    enregistrerRecord(etat.code, parseInt($("opt-predict-day").value) || 15, best);
+  }
 }
 
 // Masque la fenêtre quelques secondes après la fin (sauf si un nouveau job a démarré).
@@ -1428,5 +1493,7 @@ async function chargerConfig() {
 }
 
 // ---------------------------------------------------------------- démarrage
+PARAMS_DEFAUT = snapshotParams();   // réglages par défaut (pour le bouton "revenir aux réglages par défaut")
+$("opt-predict-day").addEventListener("change", () => { if (etat.code) rendreRecord(etat.code); });
 initStations();
 chargerConfig();
