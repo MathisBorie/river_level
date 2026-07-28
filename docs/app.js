@@ -310,8 +310,9 @@ function reinitialiserAffichageStation() {
   if (etat.modeSelection) quitterModeSelection();
 }
 
-window.ouvrirStation = async function (code) {
+window.ouvrirStation = async function (code, depuisHistorique) {
   etat.code = code;
+  if (!depuisHistorique) history.pushState({ station: code }, "", "#station=" + code);
   reinitialiserAffichageStation();
   $("vue-stations").classList.add("cache");
   $("vue-station").classList.remove("cache");
@@ -351,7 +352,7 @@ async function chargerPeriodeDisponible() {
   try {
     const p = await api(`/api/riviere/${code}/periode`);
     if (etat.code === code) {
-      $("periode-dispo").textContent = `période : ${dateFr(p.debut)} → ${dateFr(p.fin)}` +
+      $("periode-dispo").textContent = `Données disponibles : du ${dateFr(p.debut)} au ${dateFr(p.fin)}` +
         (p.nb_annees ? ` (${p.nb_annees} ans)` : "");
       etat.periode = p;
       if (p.avertissement) {
@@ -464,13 +465,25 @@ async function estimerCout() {
   if (el) el.addEventListener("change", estimerCout);
 });
 
-$("btn-retour").addEventListener("click", () => {
+function revenirCarte() {
   $("vue-station").classList.add("cache");
   $("vue-stations").classList.remove("cache");
   $("btn-retour").classList.add("cache");
   fermerReglages();
   etat.code = null;
   setTimeout(() => carteStations && carteStations.invalidateSize(), 100);
+}
+
+// Bouton retour ET flèche « précédent » du navigateur reviennent à la carte
+// (au lieu de quitter le site) : chaque station est une entrée d'historique.
+$("btn-retour").addEventListener("click", () => {
+  if (history.state && history.state.station) history.back();
+  else revenirCarte();
+});
+window.addEventListener("popstate", (e) => {
+  const code = e.state && e.state.station;
+  if (code) ouvrirStation(code, true);
+  else if (etat.code) revenirCarte();
 });
 
 // ---------------------------------------------------------------- tiroir réglages
