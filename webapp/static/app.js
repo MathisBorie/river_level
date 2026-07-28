@@ -1523,8 +1523,29 @@ function rendreInfosAppareil() {
   etat.capacites = c;
 }
 
+// Applique le réglage de calcul parallèle : taille effective = pool de l'appareil
+// SEULEMENT si l'utilisateur l'a activé, sinon 0 (séquentiel).
+function appliquerParallele() {
+  const sel = $("opt-parallele");
+  const active = sel && sel.value === "on";
+  const taille = active ? (etat.capacites && etat.capacites.pool) || 0 : 0;
+  try { localStorage.setItem("riverlab:parallele", active ? "on" : "off"); } catch (e) {}
+  if (window.RIVER_CONFIG_POOL) window.RIVER_CONFIG_POOL(taille);
+  if (active && taille < 2) toast("Ton appareil n'a pas assez de marge : le calcul restera séquentiel.");
+}
+function initParallele() {
+  const sel = $("opt-parallele");
+  if (!sel) return;
+  let pref = "off";
+  try { pref = localStorage.getItem("riverlab:parallele") || "off"; } catch (e) {}
+  sel.value = pref;
+  sel.addEventListener("change", appliquerParallele);
+  appliquerParallele();
+}
+
 // ---------------------------------------------------------------- démarrage
 rendreInfosAppareil();
+initParallele();
 PARAMS_DEFAUT = snapshotParams();   // réglages par défaut (pour le bouton "revenir aux réglages par défaut")
 $("opt-predict-day").addEventListener("change", () => { if (etat.code) rendreRecord(etat.code); });
 initStations();
