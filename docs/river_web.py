@@ -229,6 +229,18 @@ def _importer_paquet(b, mode="demander"):
 def _supprimer(code, cible):
     chemin = f"{_PERSIST}/{code}.joblib"
     octets = os.path.getsize(chemin) if os.path.exists(chemin) else 0
+    if cible == "donnees":
+        st = STORE.get(code)
+        libere = 0
+        if st and "data" in st:
+            d = st["data"]
+            try:
+                libere = int(sum(getattr(v, "nbytes", 0) for arr in d.values()
+                                 for v in ([arr.values] if hasattr(arr, "values") else [arr])))
+            except Exception:
+                libere = 0
+            st.pop("data", None)
+        return {"libelle": "données d'entraînement (en mémoire)", "octets_liberes": libere}
     if cible == "station":
         STORE.pop(code, None); ZONES.pop(code, None); SELECTION.pop(code, None)
         if os.path.exists(chemin):
@@ -885,15 +897,28 @@ async def _fit_incertitude(base, Xs, Ys, Xe, Ye, targets, type_var="gradient_boo
         q_down[niv] = [float(np.quantile(sd[:, h], lo)) for h in range(nh)]
     regs["q_up"] = q_up; regs["q_down"] = q_down
 
-    # --- couverture réelle sur le jeu d'évaluation (honnête) ---
+    # --- couverture réelle + note de qualité, sur le jeu d'évaluation (honnête) ---
     couverture = {}
     if Xe is not None and len(Xe):
         resid_e = Ye.values - base.predict(Xe)
         sig_up_e, sig_dn_e = _sigmas_mat(regs, Xe)
-        for niv, _a in _IC_ALPHA:
+        ye = Ye.values
+        for niv, alpha in _IC_ALPHA:
             qu = np.array(q_up[niv]); qd = np.array(q_down[niv])
             dedans = (resid_e <= qu * sig_up_e) & (resid_e >= qd * sig_dn_e)
             couverture[niv] = round(float(dedans.mean()) * 100, 1)
+        # NOTE : score d'intervalle de Winkler au niveau 95% (pénalise à la fois la
+        # largeur de la bande ET les valeurs qui en sortent) → une bande précise ET
+        # fine note haut ; une bande qui « explose » note bas malgré un bon R².
+        a95 = 0.05
+        U = (ye - resid_e) + np.array(q_up["95"]) * sig_up_e
+        L = (ye - resid_e) + np.array(q_down["95"]) * sig_dn_e
+        largeur = U - L
+        interval_score = largeur + (2 / a95) * np.maximum(0, L - ye) + (2 / a95) * np.maximum(0, ye - U)
+        echelle = max(1e-9, float(np.mean(np.abs(ye))))
+        is_norm = float(np.mean(interval_score)) / echelle
+        couverture["note"] = int(round(100.0 / (1.0 + is_norm)))
+        couverture["largeur"] = round(float(np.mean(largeur)) / echelle * 100)  # largeur IC95 en % du débit
     regs["couverture"] = couverture
     return regs
 
@@ -1126,6 +1151,34 @@ async def _run_ajouter(jid, code, noms, seuil_pca=99, var_modele="gradient_boost
         job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret, seuil_pca=seuil_pca, var_modele=var_modele)
         _sauver(code)
         log("✅ Terminé (sauvegardé sur cet appareil).")
+        job["statut"] = "termine"
+    except _Arret:
+        log("⏹️ Arrêté à la demande."); job["statut"] = "arrete"
+    except Exception as e:
+        import traceback
+        job["erreur"] = f"{type(e).__name__}: {e}"
+        log("❌ " + traceback.format_exc()[-700:]); job["statut"] = "erreur"
+
+
+async def _run_incertitude(jid, code, modele, var_modele):
+    """Ré-entraîne SEULEMENT l'incertitude d'un modèle existant (le modèle de débit
+    ne change pas), avec le modèle de variance choisi. Nécessite les données en mémoire."""
+    job = JOBS[jid]
+    log, prog, arret = _cbs(job)
+    try:
+        st = STORE.get(code)
+        if not st or "data" not in st or "Xm" not in st.get("data", {}):
+            raise ValueError("Données d'entraînement absentes de la mémoire : ré-analyse la rivière.")
+        if modele not in st.get("modeles", {}):
+            raise ValueError("Modèle introuvable.")
+        d = st["data"]
+        log(f"Ré-entraînement de l'incertitude ({NOMS_VAR.get(var_modele, var_modele)}) pour {NOMS_MODELE.get(modele, modele)}…")
+        st.setdefault("variance", {})[modele] = await _fit_incertitude(
+            st["modeles"][modele], d["Xs"], d["Ys"], d["Xe"], d["Ye"], st["targets"], var_modele, prog, arret)
+        _sauver(code)
+        cov = st["variance"][modele].get("couverture", {})
+        log(f"✅ IC 95% couvre {cov.get('95')} % · note {cov.get('note')}/100 · largeur ~{cov.get('largeur')}% du débit.")
+        job["resultat"] = {"couverture": cov}
         job["statut"] = "termine"
     except _Arret:
         log("⏹️ Arrêté à la demande."); job["statut"] = "arrete"
@@ -1430,7 +1483,17 @@ async def etat(code):
         coords_finales = sel["coords_finales"]
     elif st:
         coords_finales = st["meta"]["coords"]
+    # données d'entraînement encore en mémoire (permet d'ajouter modèle / PCA / incertitude)
+    donnees_mem = bool(st and "data" in st and "Xm" in st.get("data", {}))
+    octets_donnees = 0
+    if donnees_mem:
+        try:
+            octets_donnees = int(sum(v.values.nbytes if hasattr(v, "values") else getattr(v, "nbytes", 0)
+                                     for v in st["data"].values()))
+        except Exception:
+            octets_donnees = 0
     return {"code_station": code, "nom_station": info.get("nom"),
+            "donnees_en_memoire": donnees_mem, "octets_donnees": octets_donnees,
             "lat_station": info.get("lat"), "lon_station": info.get("lon"),
             "zones_definies": bool(zo),
             "geojson_bassins": zo["geojson_bassins"] if zo else None,
@@ -1580,6 +1643,12 @@ async def _traiter(method, path, body):
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or [],
                                            seuil_pca=float(body.get("seuil_energie") or 99),
                                            var_modele=body.get("var_modele", "gradient_boosting")))
+        return _json.dumps({"job_id": jid})
+    m = re.match(r"^/api/riviere/([^/]+)/incertitude$", p)
+    if m and method == "POST":
+        jid = _job_nouveau("incertitude", m.group(1))
+        asyncio.ensure_future(_run_incertitude(jid, m.group(1), body.get("modele"),
+                                               body.get("var_modele", "gradient_boosting")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/sauvegarder$", p)
     if m and method == "POST":

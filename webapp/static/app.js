@@ -220,11 +220,12 @@ function rendreFiabilite(elemId, data) {
   if (sd && sd.length) {
     detail = `<span class="details-r2">(J0 ${Math.round(sd[0] * 100)}% → J+${sd.length - 1} ${Math.round(sd[sd.length - 1] * 100)}%)</span>`;
   }
-  // Fidélité des intervalles : couverture réelle mesurée sur le jeu d'évaluation.
+  // Fidélité des intervalles : couverture réelle + note (précision + finesse).
   let couv = "";
   if (data.couverture && data.couverture["95"] != null) {
     const c = data.couverture;
-    couv = ` <span class="details-r2" title="Part des vraies valeurs tombées dans l'intervalle, mesurée sur des données jamais vues (cibles 50/95/99).">· IC 95% couvre <b>${c["95"]}%</b> (50%→${c["50"]}% · 99%→${c["99"]}%)</span>`;
+    const note = c.note != null ? ` · <b title="Qualité des intervalles : précision ET finesse, 0-100">note ${c.note}/100</b>` : "";
+    couv = ` <span class="details-r2" title="Couverture réelle mesurée sur des données jamais vues (cibles 50/95/99).">· IC 95% couvre <b>${c["95"]}%</b>${note}</span>`;
   }
   el.innerHTML = `<span class="details-r2">${nom} — fiabilité globale</span> ` +
     `<span class="badge-r2 ${classeR2(pct)}">R² ${pct}%</span> ${detail}${couv}`;
@@ -1021,40 +1022,59 @@ $("btn-coin-job").addEventListener("click", () => {
 function rendreModeles() {
   const r = etat.riviere;
   const conteneur = $("tableau-modeles");
+  let html = "";
   if (!r.modeles.length) {
-    conteneur.innerHTML = "<p class='aide'>Aucun modèle entraîné : lance le pipeline (ou choisis tes points à la main).</p>";
+    html = "<p class='aide'>Aucun modèle entraîné : lance le pipeline (ou choisis tes points à la main).</p>";
   } else {
-    conteneur.innerHTML =
-      "<table><tr><th>Modèle</th><th>R²</th><th title='Couverture réelle de l’IC 95% sur données jamais vues'>IC 95%</th></tr>" +
-      r.modeles
-        .map((m) => {
-          const cov = m.couverture && m.couverture["95"] != null ? `${m.couverture["95"]}%` : "—";
-          return `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(1)} %</b></td><td>${cov}</td></tr>`;
-        })
-        .join("") +
-      "</table>";
+    html =
+      "<table class='tab-modeles'><tr><th>Modèle</th><th>R²</th>" +
+      "<th title='Couverture réelle de l’IC 95% sur données jamais vues'>IC 95%</th>" +
+      "<th title='Qualité des intervalles : précision ET finesse (0-100)'>note</th><th></th></tr>" +
+      r.modeles.map((m) => {
+        const cov = m.couverture || {};
+        const ic = cov["95"] != null ? `${cov["95"]}%` : "—";
+        const note = cov.note != null ? `${cov.note}` : "—";
+        return `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(0)} %</b></td>` +
+          `<td>${ic}</td><td>${note}</td><td class="actions-modele">` +
+          (r.donnees_en_memoire ? `<button class="mini" data-incert="${m.nom}" title="Ré-entraîner l'incertitude de ce modèle">🎯</button>` : "") +
+          `<button class="mini-del" data-delmod="${m.nom}" title="Supprimer ce modèle">✕</button></td></tr>`;
+      }).join("") + "</table>";
   }
+  // Données d'entraînement en mémoire : réutilisables (ajout de modèle, PCA, incertitude), supprimables.
+  if (r.donnees_en_memoire) {
+    html += `<p class="aide donnees-mem">🗃️ <b>Données d'entraînement</b> gardées en mémoire — ${octetsLisibles(r.octets_donnees || 0)} ` +
+      `<span class="ind">(pour ajouter un modèle, refaire une PCA, ou ré-entraîner l'incertitude 🎯)</span> ` +
+      `<button class="mini-del" data-deldata="1" title="Libérer la mémoire">✕</button></p>`;
+  } else if (r.modeles.length) {
+    html += `<p class="aide ind">Données d'entraînement libérées : ré-analyse la rivière pour ajouter d'autres modèles.</p>`;
+  }
+  conteneur.innerHTML = html;
+  conteneur.querySelectorAll("[data-incert]").forEach((b) => b.addEventListener("click", () => reentrainerIncertitude(b.dataset.incert)));
+  conteneur.querySelectorAll("[data-delmod]").forEach((b) => b.addEventListener("click", () => supprimerStockage(etat.code, "modele:" + b.dataset.delmod)));
+  conteneur.querySelectorAll("[data-deldata]").forEach((b) => b.addEventListener("click", () => supprimerStockage(etat.code, "donnees")));
 
   const options = r.modeles.map((m) => `<option value="${m.nom}">${NOMS_MODELES[m.nom] || m.nom}</option>`).join("");
   $("backtest-modele").innerHTML = options;
   $("prevision-modele").innerHTML = options;
-  // Modèle par défaut = le meilleur disponible (Gradient Boosting en tête).
-  const prefere = ["gradient_boosting", "ridge", "lineaire"]
-    .find((n) => r.modeles.some((m) => m.nom === n));
-  if (prefere) {
-    $("backtest-modele").value = prefere;
-    $("prevision-modele").value = prefere;
-  }
+  const prefere = ["gradient_boosting", "ridge", "lineaire"].find((n) => r.modeles.some((m) => m.nom === n));
+  if (prefere) { $("backtest-modele").value = prefere; $("prevision-modele").value = prefere; }
 
-  const sansEntrainement = !r.donnees_train_presentes;
-  $("btn-pca").disabled = sansEntrainement;
-  $("btn-entrainer").disabled = sansEntrainement;
-  document.querySelectorAll(".btn-un-modele").forEach((b) => (b.disabled = sansEntrainement));
-  if (sansEntrainement && r.modeles.length) {
-    $("btn-pca").title = $("btn-entrainer").title =
-      "Les données d'entraînement ne sont plus sur le disque (nettoyées) : relance le téléchargement des données pour ré-entraîner.";
-  }
+  // Les actions qui réutilisent les données d'entraînement dépendent de leur présence en mémoire.
+  const sansData = !r.donnees_en_memoire;
+  $("btn-pca").disabled = sansData;
+  $("btn-entrainer").disabled = sansData;
+  document.querySelectorAll(".btn-un-modele").forEach((b) => (b.disabled = sansData));
   $("btn-donnees").disabled = !r.coords_finales;
+}
+
+async function reentrainerIncertitude(nom) {
+  try {
+    const { job_id } = await post(`/api/riviere/${etat.code}/incertitude`,
+      { modele: nom, var_modele: $("opt-var-modele").value });
+    suivreJob(job_id, `Incertitude de ${NOMS_MODELES[nom] || nom} (${NOMS_MODELES[$("opt-var-modele").value] || $("opt-var-modele").value})`);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // ---------------------------------------------------------------- backtest
@@ -1313,7 +1333,8 @@ async function supprimerStockage(code, cible) {
   const nom = cible === "station" ? "TOUTE la station " + code
     : cible === "test" ? "le jeu de test de " + code + " (les tests sur le passé ne marcheront plus)"
     : cible === "travail" ? "les fichiers de travail de " + code
-    : "le modèle « " + cible.split(":")[1] + " » de " + code;
+    : cible === "donnees" ? "les données d'entraînement en mémoire (tu ne pourras plus ajouter de modèle ni ré-entraîner l'incertitude sans ré-analyser)"
+    : "le modèle « " + (NOMS_MODELES[cible.split(":")[1]] || cible.split(":")[1]) + " » de " + code;
   if (!confirm("Supprimer " + nom + " ?")) return;
   try {
     const res = await post("/api/stockage/supprimer", { code, cible });
