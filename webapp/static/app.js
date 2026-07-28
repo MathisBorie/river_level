@@ -1492,7 +1492,39 @@ async function chargerConfig() {
     "Pour analyser <i>tes</i> rivières, installe le projet en local depuis le dépôt GitHub.";
 }
 
+// -------------------------------------------------- détection des capacités de l'appareil
+// Sert à décider si le calcul parallèle (pool de workers Pyodide) vaut le coup.
+function capacitesAppareil() {
+  const coeurs = navigator.hardwareConcurrency || null;   // nb de threads logiques
+  const memGo = navigator.deviceMemory || null;           // Go approx (Chrome/Edge seulement)
+  // Un pool coûte ~1 instance Pyodide (~100 Mo + démarrage) par worker. On ne le
+  // recommande que si la machine a de la marge : plusieurs cœurs ET assez de RAM.
+  let pool = 0, verdict;
+  if (coeurs && memGo) {
+    if (coeurs >= 6 && memGo >= 8) { pool = Math.min(coeurs - 2, Math.floor(memGo / 3), 4); }
+    verdict = pool >= 2
+      ? `parallélisme envisageable (jusqu'à ${pool} workers)`
+      : "parallélisme peu rentable ici (démarrage/mémoire > gain)";
+  } else if (coeurs) {
+    if (coeurs >= 6) { pool = Math.min(coeurs - 2, 4); verdict = `parallélisme envisageable (${pool} workers), mémoire inconnue`; }
+    else verdict = "parallélisme peu rentable ici";
+  } else {
+    verdict = "capacités non détectables — parallélisme non recommandé";
+  }
+  return { coeurs, memGo, pool, verdict };
+}
+function rendreInfosAppareil() {
+  const el = $("infos-appareil");
+  if (!el) return;
+  const c = capacitesAppareil();
+  const cœurs = c.coeurs ? `${c.coeurs} cœurs` : "cœurs inconnus";
+  const mem = c.memGo ? `~${c.memGo} Go RAM` : "RAM inconnue";
+  el.innerHTML = `<b>${cœurs}</b>, <b>${mem}</b> → ${c.verdict}.`;
+  etat.capacites = c;
+}
+
 // ---------------------------------------------------------------- démarrage
+rendreInfosAppareil();
 PARAMS_DEFAUT = snapshotParams();   // réglages par défaut (pour le bouton "revenir aux réglages par défaut")
 $("opt-predict-day").addEventListener("change", () => { if (etat.code) rendreRecord(etat.code); });
 initStations();
