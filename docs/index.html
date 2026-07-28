@@ -256,6 +256,12 @@
       </div>
 
       <div class="champ-reglage">
+        <label>Calcul parallèle</label>
+        <div class="champ-controle"><span id="infos-appareil" class="champ-aide">détection…</span></div>
+        <span class="champ-aide">Le calcul (réseaux, Gradient Boosting) tourne sur un seul cœur dans le navigateur. Le parallélisme demanderait plusieurs instances Pyodide (mémoire + démarrage). Voici ce que ton appareil pourrait se permettre.</span>
+      </div>
+
+      <div class="champ-reglage">
         <label>Nombre de points météo</label>
         <div class="champ-controle">
           <input id="opt-n-preselection" type="number" value="40" min="5" max="120"> candidats →
