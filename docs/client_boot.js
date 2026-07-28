@@ -9,7 +9,15 @@
 
   worker.onmessage = (e) => {
     const d = e.data;
-    if (d.type === "pret") { resoudrePret(); masquerOverlay(); return; }
+    if (d.type === "pret") {
+      resoudrePret();
+      // Le moteur est prêt, mais la carte serait vide : on prolonge l'écran de
+      // chargement le temps de télécharger les stations (app.js le lèvera quand
+      // elles sont prêtes). Filet de sécurité au cas où ça traîne.
+      majMessageOverlay("Chargement des stations…");
+      setTimeout(masquerOverlay, 20000);
+      return;
+    }
     if (d.type === "erreur-init") { montrerErreurOverlay(d.error); return; }
     const cb = enAttente[d.id];
     if (!cb) return;
@@ -54,6 +62,11 @@
   function masquerOverlay() {
     const o = document.getElementById("overlay-chargement");
     if (o) o.classList.add("fini");
+  }
+  function majMessageOverlay(txt) {
+    const o = document.getElementById("overlay-chargement");
+    const m = o && o.querySelector(".msg");
+    if (m) m.textContent = txt;
   }
   function montrerErreurOverlay(msg) {
     const o = document.getElementById("overlay-chargement");
