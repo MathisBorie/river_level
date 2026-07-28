@@ -869,9 +869,8 @@ def _ic_par_horizon(regs, X, pred, horizons):
                 bas = lo - qbn[h]; haut = hi + qhn[h]    # Q<0 au 50% -> resserre ; Q>0 au 99% -> élargit
                 if bas > haut:                            # 50% resserré au point de croiser -> point médian
                     bas = haut = 0.5 * (bas + haut)
-                if niv != "50":                           # la prévision reste TOUJOURS dans le 95/99 ; le 50%
-                    bas = min(bas, pred[h]); haut = max(haut, pred[h])  # peut être décentré si l'aléa est asymétrique
-                d[h] = (max(0.0, bas), max(0.0, haut))
+                bas = min(bas, pred[h]); haut = max(haut, pred[h])   # la prévision est TOUJOURS dans la bande
+                d[h] = (max(0.0, bas), max(0.0, haut))               # (on étend jusqu'à elle : pas d'info contradictoire)
             out[niv] = d
         return out
     # anciens formats
@@ -942,8 +941,7 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
             L = lo_e - np.asarray(Q_bas[niv]); U = hi_e + np.asarray(Q_haut[niv])
             crois = L > U                                  # 50% resserré au point de croiser
             mid = 0.5 * (L + U); L = np.where(crois, mid, L); U = np.where(crois, mid, U)
-            if niv != "50":                                # cohérent avec l'affichage (95/99 contiennent la prévision)
-                L = np.minimum(L, pred_e); U = np.maximum(U, pred_e)
+            L = np.minimum(L, pred_e); U = np.maximum(U, pred_e)   # cohérent avec l'affichage (toutes contiennent la prévision)
             couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
         # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
         L95 = np.minimum(lo_e - np.asarray(Q_bas["95"]), pred_e)
@@ -1603,7 +1601,7 @@ async def _traiter(method, path, body):
     g1 = lambda k, d=None: q.get(k, [d])[0]
 
     if p == "/api/config":
-        return _json.dumps({"public": False, "analytics": None})
+        return _json.dumps({"public": False, "analytics": "riverlab"})
     if p == "/api/stations":
         return _json.dumps(await stations())
     if p == "/api/quota":
