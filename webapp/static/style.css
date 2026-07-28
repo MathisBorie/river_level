@@ -515,3 +515,9 @@ button.mini { padding: 4px 9px; font-size: 0.76rem; }
   font-size: 0.8rem; line-height: 1;
 }
 .mini-del:hover { background: #f8cfcc; }
+.tab-modeles td, .tab-modeles th { padding: 5px 8px; }
+.actions-modele { white-space: nowrap; text-align: right; }
+.actions-modele button { margin-left: 4px; padding: 3px 7px; }
+.donnees-mem { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px;
+  background: var(--surface-2); border: 1px solid var(--bord); border-radius: var(--rayon-s); padding: 8px 10px; }
+.donnees-mem .mini-del { margin-left: auto; }
