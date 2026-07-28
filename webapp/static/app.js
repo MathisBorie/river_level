@@ -202,8 +202,14 @@ function rendreFiabilite(elemId, data) {
   if (sd && sd.length) {
     detail = `<span class="details-r2">(J0 ${Math.round(sd[0] * 100)}% → J+${sd.length - 1} ${Math.round(sd[sd.length - 1] * 100)}%)</span>`;
   }
+  // Fidélité des intervalles : couverture réelle mesurée sur le jeu d'évaluation.
+  let couv = "";
+  if (data.couverture && data.couverture["95"] != null) {
+    const c = data.couverture;
+    couv = ` <span class="details-r2" title="Part des vraies valeurs tombées dans l'intervalle, mesurée sur des données jamais vues (cibles 50/95/99).">· IC 95% couvre <b>${c["95"]}%</b> (50%→${c["50"]}% · 99%→${c["99"]}%)</span>`;
+  }
   el.innerHTML = `<span class="details-r2">${nom} — fiabilité globale</span> ` +
-    `<span class="badge-r2 ${classeR2(pct)}">R² ${pct}%</span> ${detail}`;
+    `<span class="badge-r2 ${classeR2(pct)}">R² ${pct}%</span> ${detail}${couv}`;
   el.classList.remove("cache");
 }
 
@@ -744,8 +750,10 @@ function paramsDonnees() {
     past_day: parseInt($("opt-past-day").value) || 20,
     predict_day: parseInt($("opt-predict-day").value) || 15,
     mode_split: $("opt-mode-split").value,
-    part_test: parseFloat($("opt-part-test").value) || 0.2,
+    part_sigma: parseFloat($("opt-part-sigma").value) || 0.3,
+    part_eval: parseFloat($("opt-part-eval").value) || 0.2,
     temp_mode: $("opt-temp-mode").value,
+    var_modele: $("opt-var-modele").value,
     ...fenetreApprentissage(),
   };
 }
@@ -832,7 +840,7 @@ function dessinerPca(res) {
 $("btn-entrainer").addEventListener("click", async () => {
   const modeles = Array.from(document.querySelectorAll(".case-modele:checked")).map((c) => c.value);
   if (!modeles.length) return toast("Coche au moins un modèle à entraîner.", true);
-  const corps = { modeles, incertitude: $("opt-incertitude").checked, seuil_energie: seuilEnergie() };
+  const corps = { modeles, seuil_energie: seuilEnergie(), var_modele: $("opt-var-modele").value };
   try {
     const { job_id } = await post(`/api/riviere/${etat.code}/entrainer`, corps);
     suivreJob(job_id, `Entraînement de ${modeles.length} modèle(s)`);
@@ -844,7 +852,7 @@ $("btn-entrainer").addEventListener("click", async () => {
 document.querySelectorAll(".btn-un-modele").forEach((bouton) => {
   bouton.addEventListener("click", async () => {
     const modele = bouton.dataset.modele;
-    const corps = { modele, incertitude: $("opt-incertitude").checked, seuil_energie: seuilEnergie() };
+    const corps = { modele, seuil_energie: seuilEnergie(), var_modele: $("opt-var-modele").value };
     try {
       const { job_id } = await post(`/api/riviere/${etat.code}/entrainer-modele`, corps);
       suivreJob(job_id, `Entraînement : ${NOMS_MODELES[modele] || modele}`);
@@ -998,12 +1006,12 @@ function rendreModeles() {
     conteneur.innerHTML = "<p class='aide'>Aucun modèle entraîné : lance le pipeline (ou choisis tes points à la main).</p>";
   } else {
     conteneur.innerHTML =
-      "<table><tr><th>Modèle</th><th>R²</th></tr>" +
+      "<table><tr><th>Modèle</th><th>R²</th><th title='Couverture réelle de l’IC 95% sur données jamais vues'>IC 95%</th></tr>" +
       r.modeles
-        .map(
-          (m) =>
-            `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(1)} %</b></td></tr>`
-        )
+        .map((m) => {
+          const cov = m.couverture && m.couverture["95"] != null ? `${m.couverture["95"]}%` : "—";
+          return `<tr><td>${NOMS_MODELES[m.nom] || m.nom}</td><td><b>${(m.score * 100).toFixed(1)} %</b></td><td>${cov}</td></tr>`;
+        })
         .join("") +
       "</table>";
   }
