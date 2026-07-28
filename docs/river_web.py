@@ -1092,7 +1092,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
                     log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99,
                     mode_split="annees_aleatoires", part_test=0.2, temp_mode="minmax",
-                    var_modele="gradient_boosting", part_sigma=0.3, part_eval=0.2):
+                    var_modele="monte_carlo", part_sigma=0.3, part_eval=0.2):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
     arret = arret or (lambda: None)
@@ -1237,7 +1237,7 @@ async def _run_points(jid, code, body):
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
                                temp_mode=body.get("temp_mode", "minmax"),
-                               var_modele=body.get("var_modele", "gradient_boosting"),
+                               var_modele=body.get("var_modele", "monte_carlo"),
                                part_sigma=float(body.get("part_sigma") or 0.3),
                                part_eval=float(body.get("part_eval") or 0.2))
         sc = info["resultats"].get(modele, {})
@@ -1253,7 +1253,7 @@ async def _run_points(jid, code, body):
         log("❌ " + traceback.format_exc()[-700:]); job["statut"] = "erreur"
 
 
-async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99, var_modele="gradient_boosting"):
+async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99, var_modele="monte_carlo"):
     """Entraîne un/des modèle(s) SUPPLÉMENTAIRE(S) sur les données déjà en mémoire
     (aucun re-téléchargement) et les ajoute à STORE[code]."""
     st = STORE.get(code)
@@ -1276,7 +1276,7 @@ async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99, var_modele
     return {"modeles": list(st["scores"].keys())}
 
 
-async def _run_ajouter(jid, code, noms, seuil_pca=99, var_modele="gradient_boosting"):
+async def _run_ajouter(jid, code, noms, seuil_pca=99, var_modele="monte_carlo"):
     job = JOBS[jid]
     log, prog, arret = _cbs(job)
     try:
@@ -1371,7 +1371,7 @@ async def _run_pipeline(jid, code, body):
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
                                temp_mode=body.get("temp_mode", "minmax"),
-                               var_modele=body.get("var_modele", "gradient_boosting"),
+                               var_modele=body.get("var_modele", "monte_carlo"),
                                part_sigma=float(body.get("part_sigma") or 0.3),
                                part_eval=float(body.get("part_eval") or 0.2))
         sc = info["resultats"].get(modele, {})
@@ -1553,7 +1553,7 @@ def pca_analyse(code, seuil):
     st = STORE.get(code)
     if not st or "data" not in st:
         return {"erreur": "Analyse d'abord la rivière (aucune donnée en mémoire)."}
-    Xtr = st["data"]["Xtr"]
+    Xtr = st["data"]["Xm"]                 # jeu MODÈLE (renommé Xtr->Xm avec le découpage 3 jeux)
     p = PCA(svd_solver="full").fit(Xtr)
     ratio = p.explained_variance_ratio_ * 100.0
     cum = np.cumsum(ratio)
@@ -1770,20 +1770,20 @@ async def _traiter(method, path, body):
         jid = _job_nouveau("entrainer", m.group(1))
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), [body.get("modele")],
                                            seuil_pca=float(body.get("seuil_energie") or 99),
-                                           var_modele=body.get("var_modele", "gradient_boosting")))
+                                           var_modele=body.get("var_modele", "monte_carlo")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/entrainer$", p)
     if m and method == "POST":
         jid = _job_nouveau("entrainer", m.group(1))
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or [],
                                            seuil_pca=float(body.get("seuil_energie") or 99),
-                                           var_modele=body.get("var_modele", "gradient_boosting")))
+                                           var_modele=body.get("var_modele", "monte_carlo")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/incertitude$", p)
     if m and method == "POST":
         jid = _job_nouveau("incertitude", m.group(1))
         asyncio.ensure_future(_run_incertitude(jid, m.group(1), body.get("modele"),
-                                               body.get("var_modele", "gradient_boosting")))
+                                               body.get("var_modele", "monte_carlo")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/sauvegarder$", p)
     if m and method == "POST":
