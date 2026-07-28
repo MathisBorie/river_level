@@ -847,6 +847,11 @@ def _sigmas_mat(regs, X):
 
 
 _Z_IC = {"50": 0.674, "95": 1.960, "99": 2.576}
+# bornes de la modulation conditionnelle : la bande d'un point vaut le calage
+# global × (son écart conditionnel / l'écart médian), borné à [×0.4, ×2.5]. Ça
+# garde l'adaptativité (fine si calme, large si agité) SANS exploser sur les
+# crues (une queue lourde ne peut plus multiplier la bande à l'infini).
+_IC_MOD_LO, _IC_MOD_HI = 0.4, 2.5
 
 
 def _ic_par_horizon(regs, X, pred, horizons):
@@ -855,6 +860,20 @@ def _ic_par_horizon(regs, X, pred, horizons):
     résidus, un seul score par horizon) si dispo, sinon anciens formats (sigma
     conforme ou z-score) pour rétro-compat."""
     out = {}
+    if regs.get("k_bas"):        # ancré sur la prévision, deux côtés indépendants + conditionnel borné
+        kb, kh = regs["k_bas"], regs["k_haut"]
+        smb, smh = regs["s_med_bas"], regs["s_med_haut"]
+        for niv, _a in _IC_ALPHA:
+            d = {}
+            for h in horizons:
+                p = float(pred[h])
+                lo = float(regs["q_lo"][h].predict(X)[0]); hi = float(regs["q_hi"][h].predict(X)[0])
+                m_bas = min(_IC_MOD_HI, max(_IC_MOD_LO, max(p - lo, 1e-9) / smb[h]))   # modulation bornée
+                m_haut = min(_IC_MOD_HI, max(_IC_MOD_LO, max(hi - p, 1e-9) / smh[h]))  # (gère aussi prév hors quantiles)
+                bas = p - kb[niv][h] * m_bas; haut = p + kh[niv][h] * m_haut           # prévision TOUJOURS au centre
+                d[h] = (max(0.0, bas), max(0.0, haut))
+            out[niv] = d
+        return out
     if regs.get("cqr"):
         Qb, Qh = regs.get("Q_bas"), regs.get("Q_haut")
         if Qb is None:                                   # rétro-compat : ancien Q symétrique
@@ -892,14 +911,17 @@ def _ic_par_horizon(regs, X, pred, horizons):
 
 
 async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="gradient_boosting", prog=None, arret=None):
-    """Incertitude par CQR (Conformalized Quantile Regression), SANS fuite :
+    """Incertitude ANCRÉE SUR LA PRÉVISION, chaque côté indépendamment :
       • deux modèles de QUANTILE — bas 2,5 % et haut 97,5 % — appris sur le jeu
-        MODÈLE (choix du type : Gradient Boosting quantile ou Ridge quantile) ;
-      • correction conforme Q par horizon sur le jeu de CALIBRATION → garantit la
-        couverture 95 % (Q = quantile 95% du score max(q_bas−y, y−q_haut)) ;
-      • 50 % et 99 % obtenus par extrapolation gaussienne ASYMÉTRIQUE du 95 % ;
-      • couverture + note mesurées sur le jeu d'ÉVALUATION (jamais vu).
-    Aucune division par σ → plus d'intervalles qui explosent."""
+        MODÈLE (Gradient Boosting quantile ou Ridge quantile) : ils donnent la
+        FORME conditionnelle (bande fine si calme, large si agité) ;
+      • sur la CALIBRATION, on regarde les résidus autour de la prévision séparés
+        « sous » / « au-dessus » ; pour chaque niveau (50/95/99) on cherche, de
+        chaque côté, le facteur qui attrape la bonne fraction des résidus de CE
+        côté (L de chaque côté → L au total) → la prévision est TOUJOURS au centre ;
+      • la forme conditionnelle module la largeur, BORNÉE à [×0.4, ×2.5] pour ne
+        pas exploser sur une queue lourde (crues) ;
+      • couverture + note (globale et 1re semaine) mesurées sur l'ÉVALUATION."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
     nh = len(targets)
     Ym_v = Ym.values
@@ -912,47 +934,74 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
         if h % 2 == 0:
             await asyncio.sleep(0)
 
-    # --- correction conforme ASYMÉTRIQUE, par niveau, sur le jeu de calibration.
-    #     Deux scores séparés par horizon : E_bas (y passé SOUS la borne basse) et
-    #     E_haut (y passé AU-DESSUS de la borne haute). On calibre chaque côté à
-    #     a/2 -> couverture 1-a, mais la difficulté du HAUT (crues) ne tire plus la
-    #     borne du BAS. Trois niveaux (50/95/99) en prenant trois quantiles. ---
-    Yc_v = Yc.values; nc = max(1, len(Yc_v))
-    Q_bas = {niv: [] for niv, _a in _IC_ALPHA}
-    Q_haut = {niv: [] for niv, _a in _IC_ALPHA}
+    # --- calage ANCRÉ SUR LA PRÉVISION, chaque côté INDÉPENDAMMENT (sur calibration).
+    #     On regarde les résidus autour de la prévision, séparés en « sous » et
+    #     « au-dessus ». Les modèles de quantile donnent la FORME conditionnelle
+    #     (écart prévision->quantile, qui s'adapte à la météo), et pour chaque
+    #     niveau on cherche, de chaque côté, le facteur qui attrape la bonne
+    #     fraction des résidus de CE côté (L de chaque côté -> L au total). La
+    #     prévision est donc TOUJOURS au centre ; bande asymétrique ET
+    #     conditionnelle, sans division instable (plancher par côté). ---
+    Yc_v = Yc.values
+    pred_c = np.asarray(base.predict(Xc))
+    if pred_c.ndim == 1:
+        pred_c = pred_c.reshape(-1, 1)
+    k_bas = {niv: [] for niv, _a in _IC_ALPHA}
+    k_haut = {niv: [] for niv, _a in _IC_ALPHA}
+    s_med_bas, s_med_haut = [], []
     for h in range(nh):
-        lo = q_lo[h].predict(Xc); hi = q_hi[h].predict(Xc)
-        E_bas = lo - Yc_v[:, h]                             # >0 si y sous la borne basse
-        E_haut = Yc_v[:, h] - hi                            # >0 si y au-dessus de la borne haute
+        arret()
+        pc = pred_c[:, h]
+        s_bas_raw = np.maximum(pc - q_lo[h].predict(Xc), 1e-9)      # écart prévision -> quantile bas (forme conditionnelle)
+        s_haut_raw = np.maximum(q_hi[h].predict(Xc) - pc, 1e-9)     # écart quantile haut -> prévision
+        smb = max(1e-9, float(np.median(s_bas_raw))); smh = max(1e-9, float(np.median(s_haut_raw)))
+        s_med_bas.append(smb); s_med_haut.append(smh)
+        m_bas = np.clip(s_bas_raw / smb, _IC_MOD_LO, _IC_MOD_HI)    # modulation conditionnelle BORNÉE
+        m_haut = np.clip(s_haut_raw / smh, _IC_MOD_LO, _IC_MOD_HI)
+        r = Yc_v[:, h] - pc
+        sous = r < 0                                       # valeurs SOUS la prévision / AU-DESSUS
+        u_bas = (-r[sous]) / m_bas[sous] if sous.any() else np.zeros(1)
+        u_haut = r[~sous] / m_haut[~sous] if (~sous).any() else np.zeros(1)
+        nb = max(1, int(sous.sum())); na = max(1, int((~sous).sum()))
         for niv, a in _IC_ALPHA:
-            niveau = min(1.0, (1 - a / 2) * (nc + 1) / nc)  # a/2 par côté
-            Q_bas[niv].append(float(np.quantile(E_bas, niveau)))
-            Q_haut[niv].append(float(np.quantile(E_haut, niveau)))
-    regs = {"cqr": True, "q_lo": q_lo, "q_hi": q_hi, "Q_bas": Q_bas, "Q_haut": Q_haut, "type_var": type_var}
+            L = 1 - a                                      # couverture visée = L de CHAQUE côté -> L au total
+            k_bas[niv].append(float(np.quantile(u_bas, min(1.0, L * (nb + 1) / nb))))
+            k_haut[niv].append(float(np.quantile(u_haut, min(1.0, L * (na + 1) / na))))
+        if h % 3 == 0:
+            await asyncio.sleep(0)
+    regs = {"cqr": True, "k_bas": k_bas, "k_haut": k_haut, "s_med_bas": s_med_bas,
+            "s_med_haut": s_med_haut, "q_lo": q_lo, "q_hi": q_hi, "type_var": type_var}
 
-    # --- couverture réelle + note, sur le jeu d'ÉVALUATION (jamais vu) ---
+    # --- couverture réelle + notes, sur le jeu d'ÉVALUATION (jamais vu) ---
     couverture = {}
     if Xe is not None and len(Xe):
         ye = Ye.values
+        pred_e = np.asarray(base.predict(Xe))
+        if pred_e.ndim == 1:
+            pred_e = pred_e.reshape(-1, 1)
         lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
         hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
-        pred_e = base.predict(Xe)                          # la prévision doit être DANS la bande (cohérent affichage)
+        m_bas_e = np.clip(np.maximum(pred_e - lo_e, 1e-9) / np.asarray(s_med_bas), _IC_MOD_LO, _IC_MOD_HI)
+        m_haut_e = np.clip(np.maximum(hi_e - pred_e, 1e-9) / np.asarray(s_med_haut), _IC_MOD_LO, _IC_MOD_HI)
         for niv, _a in _IC_ALPHA:
-            L = lo_e - np.asarray(Q_bas[niv]); U = hi_e + np.asarray(Q_haut[niv])
-            crois = L > U                                  # 50% resserré au point de croiser
-            mid = 0.5 * (L + U); L = np.where(crois, mid, L); U = np.where(crois, mid, U)
-            L = np.minimum(L, pred_e); U = np.maximum(U, pred_e)   # cohérent avec l'affichage (toutes contiennent la prévision)
+            L = pred_e - np.asarray(k_bas[niv]) * m_bas_e
+            U = pred_e + np.asarray(k_haut[niv]) * m_haut_e
             couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
         # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
-        L95 = np.minimum(lo_e - np.asarray(Q_bas["95"]), pred_e)
-        U95 = np.maximum(hi_e + np.asarray(Q_haut["95"]), pred_e)
+        L95 = pred_e - np.asarray(k_bas["95"]) * m_bas_e
+        U95 = pred_e + np.asarray(k_haut["95"]) * m_haut_e
         a95 = 0.05
-        largeur = U95 - L95
-        interval_score = largeur + (2 / a95) * np.maximum(0, L95 - ye) + (2 / a95) * np.maximum(0, ye - U95)
-        echelle = max(1e-9, float(np.mean(np.abs(ye))))
-        is_norm = float(np.mean(interval_score)) / echelle
-        couverture["note"] = int(round(100.0 / (1.0 + is_norm)))
-        couverture["largeur"] = round(float(np.mean(largeur)) / echelle * 100)
+
+        def _note(L_, U_, y_):
+            largeur = U_ - L_
+            isc = largeur + (2 / a95) * np.maximum(0, L_ - y_) + (2 / a95) * np.maximum(0, y_ - U_)
+            ech = max(1e-9, float(np.mean(np.abs(y_))))
+            return int(round(100.0 / (1.0 + float(np.mean(isc)) / ech))), round(float(np.mean(largeur)) / ech * 100)
+
+        couverture["note"], couverture["largeur"] = _note(L95, U95, ye)
+        proche = [h for h in range(1, nh) if h <= 7]        # note « première semaine » (J+1 -> J+7)
+        if proche:
+            couverture["note_proche"] = _note(L95[:, proche], U95[:, proche], ye[:, proche])[0]
     regs["couverture"] = couverture
     return regs
 
