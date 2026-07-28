@@ -423,7 +423,9 @@ async function chargerPeriodeDisponible() {
         $(id).min = p.debut;
         $(id).max = p.fin;
       }
-      if (!$("opt-train-debut").value) $("opt-train-debut").value = p.debut;
+      // Par défaut : on démarre au max(1980, début des données) — les années
+      // trop anciennes sont souvent lacunaires et peu représentatives du climat actuel.
+      if (!$("opt-train-debut").value) $("opt-train-debut").value = (p.debut < "1980-01-01") ? "1980-01-01" : p.debut;
       if (!$("opt-train-fin").value) $("opt-train-fin").value = p.fin;
       estimerCout();
     }
