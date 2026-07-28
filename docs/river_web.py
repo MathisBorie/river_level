@@ -764,12 +764,12 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
     return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
-MODELES_VAR = ("gradient_boosting", "ridge", "foret")
-NOMS_VAR = {"gradient_boosting": "Gradient Boosting", "ridge": "Ridge (linéaire)", "foret": "Forêt aléatoire"}
+MODELES_VAR = ("gradient_boosting", "ridge")
+NOMS_VAR = {"gradient_boosting": "Gradient Boosting quantile", "ridge": "Ridge quantile", "foret": "Forêt aléatoire"}
 
 
 def _reg_var_neuf(type_var):
-    """Régresseur qui apprend la variance (au choix de l'utilisateur)."""
+    """Régresseur qui apprend la variance (ancien format, conservé pour compat)."""
     if type_var == "ridge":
         return Ridge(alpha=10.0)
     if type_var == "foret":
@@ -778,6 +778,18 @@ def _reg_var_neuf(type_var):
     return HistGradientBoostingRegressor(max_iter=70, max_depth=3, max_leaf_nodes=15,
                                          learning_rate=0.08, min_samples_leaf=40, l2_regularization=2.0,
                                          early_stopping=True, validation_fraction=0.1, n_iter_no_change=8, random_state=42)
+
+
+def _reg_quantile_neuf(type_var, q):
+    """Régresseur de QUANTILE `q` (bord haut/bas), au choix de l'utilisateur.
+    'ridge' = régression quantile linéaire ; sinon Gradient Boosting quantile."""
+    if type_var == "ridge":
+        from sklearn.linear_model import QuantileRegressor
+        return QuantileRegressor(quantile=q, alpha=0.0, solver="highs")
+    return HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=100, max_depth=3,
+                                         max_leaf_nodes=15, learning_rate=0.08, min_samples_leaf=40,
+                                         l2_regularization=2.0, early_stopping=True, validation_fraction=0.1,
+                                         n_iter_no_change=8, random_state=42)
 
 
 def _reg_variance(X, r, cote, type_var):
@@ -835,11 +847,24 @@ _Z_IC = {"50": 0.674, "95": 1.960, "99": 2.576}
 
 
 def _ic_par_horizon(regs, X, pred, horizons):
-    """{niv: {h: (bas, haut)}} en L/s pour une ligne X. Utilise les facteurs
-    conformes si présents (q_up/q_down), sinon l'ancien z-score (rétro-compat)."""
+    """{niv: {h: (bas, haut)}} en L/s pour une ligne X. CQR (quantiles + correction
+    conforme Q ; 50/99 par extrapolation gaussienne du 95%) si dispo, sinon anciens
+    formats (sigma conforme ou z-score) pour rétro-compat."""
+    out = {}
+    if regs.get("cqr"):
+        for niv, _a in _IC_ALPHA:
+            f = _Z_IC[niv] / _Z_IC["95"]     # facteur gaussien depuis le 95% calibré
+            d = {}
+            for h in horizons:
+                lo = float(regs["q_lo"][h].predict(X)[0]); hi = float(regs["q_hi"][h].predict(X)[0])
+                U95 = hi + regs["Q"][h]; L95 = lo - regs["Q"][h]
+                whaut = max(1e-9, U95 - pred[h]); wbas = max(1e-9, pred[h] - L95)
+                d[h] = (max(0.0, pred[h] - f * wbas), pred[h] + f * whaut)
+            out[niv] = d
+        return out
+    # anciens formats
     sig = _sigmas_ligne(regs, X, horizons)
     conforme = "q_up" in regs
-    out = {}
     for niv, _a in _IC_ALPHA:
         d = {}
         for h in horizons:
@@ -855,70 +880,59 @@ def _ic_par_horizon(regs, X, pred, horizons):
     return out
 
 
-async def _fit_incertitude(base, Xs, Ys, Xe, Ye, targets, type_var="gradient_boosting", prog=None, arret=None):
-    """Incertitude CONFORME et ASYMÉTRIQUE, SANS fuite de données :
-      • σ_haut / σ_bas appris sur le jeu ÉCART-TYPE (résidus hors-échantillon du
-        modèle) avec le modèle de variance choisi (type_var) ;
-      • facteurs conformes q_haut/q_bas par niveau = quantiles des résidus
-        normalisés (calibrent la largeur pour une vraie couverture) ;
-      • couverture RÉELLE mesurée sur le jeu ÉVALUATION (jamais vu)."""
+async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="gradient_boosting", prog=None, arret=None):
+    """Incertitude par CQR (Conformalized Quantile Regression), SANS fuite :
+      • deux modèles de QUANTILE — bas 2,5 % et haut 97,5 % — appris sur le jeu
+        MODÈLE (choix du type : Gradient Boosting quantile ou Ridge quantile) ;
+      • correction conforme Q par horizon sur le jeu de CALIBRATION → garantit la
+        couverture 95 % (Q = quantile 95% du score max(q_bas−y, y−q_haut)) ;
+      • 50 % et 99 % obtenus par extrapolation gaussienne ASYMÉTRIQUE du 95 % ;
+      • couverture + note mesurées sur le jeu d'ÉVALUATION (jamais vu).
+    Aucune division par σ → plus d'intervalles qui explosent."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
     nh = len(targets)
-    resid_s = Ys.values - base.predict(Xs)
-    ups, downs = [], []
-    for i in range(nh):
+    Ym_v = Ym.values
+    q_lo, q_hi = [], []
+    for h in range(nh):
         arret()
-        r = resid_s[:, i]
-        ups.append(_reg_variance(Xs, r, "up", type_var))
-        downs.append(_reg_variance(Xs, r, "down", type_var))
-        prog("Incertitude (conforme)", int((i + 1) / nh * 100), i + 1, nh)
-        if i % 2 == 0:
+        mlo = _reg_quantile_neuf(type_var, 0.025); mlo.fit(Xm, Ym_v[:, h]); q_lo.append(mlo)
+        mhi = _reg_quantile_neuf(type_var, 0.975); mhi.fit(Xm, Ym_v[:, h]); q_hi.append(mhi)
+        prog("Incertitude (CQR)", int((h + 1) / nh * 100), h + 1, nh)
+        if h % 2 == 0:
             await asyncio.sleep(0)
-    regs = {"up": ups, "down": downs, "type_var": type_var}
 
-    # --- bornes de variance par horizon (σ ∈ [0,1·RMS , 4·max|résidu|]) : sans
-    #     cela, un σ prédit ≈ 0 fait exploser r/σ et donne des IC en milliards ---
-    rms2 = np.mean(resid_s ** 2, axis=0)                 # (H,)
-    rmax = np.max(np.abs(resid_s), axis=0)               # (H,)
-    var_floor = np.maximum(1e-6, 0.01 * rms2)            # σ ≥ 0,1·RMS
-    var_cap = np.maximum(4.0 * rms2, (4.0 * rmax) ** 2)  # σ ≤ ~4·max|résidu|
-    regs["var_bornes"] = {"floor": var_floor.tolist(), "cap": var_cap.tolist()}
+    # --- correction conforme Q par horizon, sur le jeu de calibration ---
+    Yc_v = Yc.values; nc = max(1, len(Yc_v))
+    niveau = min(1.0, (1 - 0.05) * (nc + 1) / nc)   # 95 %
+    Q = []
+    for h in range(nh):
+        lo = q_lo[h].predict(Xc); hi = q_hi[h].predict(Xc)
+        E = np.maximum(lo - Yc_v[:, h], Yc_v[:, h] - hi)   # score de non-conformité
+        Q.append(float(np.quantile(E, niveau)))
+    regs = {"cqr": True, "q_lo": q_lo, "q_hi": q_hi, "Q": Q, "type_var": type_var}
 
-    # --- calibration conforme sur le jeu écart-type (résidus normalisés bornés) ---
-    sig_up_s, sig_dn_s = _sigmas_mat(regs, Xs)
-    su = resid_s / sig_up_s
-    sd = resid_s / sig_dn_s
-    ns = max(1, len(resid_s))
-    q_up, q_down = {}, {}
-    for niv, alpha in _IC_ALPHA:
-        hi = min(1.0, (1 - alpha / 2) * (ns + 1) / ns)
-        lo = max(0.0, (alpha / 2) * (ns + 1) / ns)
-        q_up[niv] = [float(np.quantile(su[:, h], hi)) for h in range(nh)]
-        q_down[niv] = [float(np.quantile(sd[:, h], lo)) for h in range(nh)]
-    regs["q_up"] = q_up; regs["q_down"] = q_down
-
-    # --- couverture réelle + note de qualité, sur le jeu d'évaluation (honnête) ---
+    # --- couverture réelle + note, sur le jeu d'évaluation (asymétrique + gaussien) ---
     couverture = {}
     if Xe is not None and len(Xe):
-        resid_e = Ye.values - base.predict(Xe)
-        sig_up_e, sig_dn_e = _sigmas_mat(regs, Xe)
         ye = Ye.values
-        for niv, alpha in _IC_ALPHA:
-            qu = np.array(q_up[niv]); qd = np.array(q_down[niv])
-            dedans = (resid_e <= qu * sig_up_e) & (resid_e >= qd * sig_dn_e)
-            couverture[niv] = round(float(dedans.mean()) * 100, 1)
-        # NOTE : score d'intervalle de Winkler au niveau 95% (pénalise à la fois la
-        # largeur de la bande ET les valeurs qui en sortent) → une bande précise ET
-        # fine note haut ; une bande qui « explose » note bas malgré un bon R².
+        pred_e = base.predict(Xe)
+        lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
+        hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
+        Qa = np.asarray(Q)
+        U95 = hi_e + Qa; L95 = lo_e - Qa
+        whaut = np.maximum(1e-9, U95 - pred_e); wbas = np.maximum(1e-9, pred_e - L95)
+        for niv, _a in _IC_ALPHA:
+            f = _Z_IC[niv] / _Z_IC["95"]
+            U = pred_e + f * whaut; L = pred_e - f * wbas
+            couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
+        # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
         a95 = 0.05
-        U = (ye - resid_e) + np.array(q_up["95"]) * sig_up_e
-        L = (ye - resid_e) + np.array(q_down["95"]) * sig_dn_e
-        largeur = U - L
-        interval_score = largeur + (2 / a95) * np.maximum(0, L - ye) + (2 / a95) * np.maximum(0, ye - U)
+        largeur = U95 - L95
+        interval_score = largeur + (2 / a95) * np.maximum(0, L95 - ye) + (2 / a95) * np.maximum(0, ye - U95)
         echelle = max(1e-9, float(np.mean(np.abs(ye))))
         is_norm = float(np.mean(interval_score)) / echelle
         couverture["note"] = int(round(100.0 / (1.0 + is_norm)))
-        couverture["largeur"] = round(float(np.mean(largeur)) / echelle * 100)  # largeur IC95 en % du débit
+        couverture["largeur"] = round(float(np.mean(largeur)) / echelle * 100)
     regs["couverture"] = couverture
     return regs
 
@@ -1007,7 +1021,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
         objets[nom] = m
         resultats[nom] = sc
         log(f"Estimation de l'incertitude (conforme, modèle : {NOMS_VAR.get(var_modele, var_modele)})…")
-        variances[nom] = await _fit_incertitude(m, Xs, Ys, Xe, Ye, targets, var_modele, prog, arret)
+        variances[nom] = await _fit_incertitude(m, Xm, Ym, Xs, Ys, Xe, Ye, targets, var_modele, prog, arret)
         cov = variances[nom].get("couverture", {})
         if cov.get("95") is not None:
             log(f"   couverture réelle de l'IC 95% (sur l'évaluation) : {cov['95']} %")
@@ -1135,7 +1149,7 @@ async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99, var_modele
         if m is None:
             continue
         st["modeles"][nom] = m; st["scores"][nom] = sc
-        st.setdefault("variance", {})[nom] = await _fit_incertitude(m, d["Xs"], d["Ys"], d["Xe"], d["Ye"], targets, var_modele, prog, arret)
+        st.setdefault("variance", {})[nom] = await _fit_incertitude(m, d["Xm"], d["Ym"], d["Xs"], d["Ys"], d["Xe"], d["Ye"], targets, var_modele, prog, arret)
         log(f"   → {NOMS_MODELE.get(nom, nom)} : fiabilité {sc['r2'] * 100:.0f} %")
     prog("Terminé", 100)
     return {"modeles": list(st["scores"].keys())}
@@ -1174,7 +1188,7 @@ async def _run_incertitude(jid, code, modele, var_modele):
         d = st["data"]
         log(f"Ré-entraînement de l'incertitude ({NOMS_VAR.get(var_modele, var_modele)}) pour {NOMS_MODELE.get(modele, modele)}…")
         st.setdefault("variance", {})[modele] = await _fit_incertitude(
-            st["modeles"][modele], d["Xs"], d["Ys"], d["Xe"], d["Ye"], st["targets"], var_modele, prog, arret)
+            st["modeles"][modele], d["Xm"], d["Ym"], d["Xs"], d["Ys"], d["Xe"], d["Ye"], st["targets"], var_modele, prog, arret)
         _sauver(code)
         cov = st["variance"][modele].get("couverture", {})
         log(f"✅ IC 95% couvre {cov.get('95')} % · note {cov.get('note')}/100 · largeur ~{cov.get('largeur')}% du débit.")
