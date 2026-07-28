@@ -1110,12 +1110,14 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     s, e = debut.strftime("%Y-%m-%d"), fin.strftime("%Y-%m-%d")
 
     arret()
-    prog("Téléchargement du débit", None); log(f"Téléchargement du débit ({s} → {e})…")
-    df_eau = await debit(code, s, e)
     vm = _vars_meteo(temp_mode)
-    arret()
-    prog("Téléchargement de la météo", None); log(f"Téléchargement de la météo sur {len(coords)} points…")
-    df_meteo = await meteo_moyenne(coords, s, e, temp_mode=temp_mode)
+    # Débit (Hub'Eau) et météo (Open-Meteo) sont indépendants et sur des serveurs
+    # différents -> on les télécharge EN PARALLÈLE (gain gratuit, réseau concurrent).
+    prog("Téléchargement débit + météo", None)
+    log(f"Téléchargement débit + météo en parallèle ({s} → {e}, {len(coords)} points)…")
+    df_eau, df_meteo = await asyncio.gather(
+        debit(code, s, e),
+        meteo_moyenne(coords, s, e, temp_mode=temp_mode))
     t_dl = time.time() - t0
     await asyncio.sleep(0)
 
@@ -1398,8 +1400,8 @@ async def _fenetre_test(code, date, meta):
     vm = meta.get("vars_meteo", VARS_METEO); temp_mode = meta.get("temp_mode", "moyenne")
     s = (date - pd.Timedelta(days=past + 20)).strftime("%Y-%m-%d")
     e = (date + pd.Timedelta(days=horizon + 3)).strftime("%Y-%m-%d")
-    df_eau = await debit(code, s, e)
-    df_meteo = await meteo_moyenne(coords, s, e, temp_mode=temp_mode)
+    df_eau, df_meteo = await asyncio.gather(          # débit + météo en parallèle
+        debit(code, s, e), meteo_moyenne(coords, s, e, temp_mode=temp_mode))
     df, _, _ = construire(df_eau, df_meteo, past, horizon, vars_meteo=vm)
     return df
 
