@@ -266,12 +266,32 @@ async function initStations() {
     etat.stations = await api("/api/stations");
   } catch (e) {
     toast("Impossible de charger les stations : " + e.message, true);
+    masquerOverlayDemarrage();   // ne pas rester bloqué sur l'écran de chargement
     return;
   }
+  await rafraichirCodesAvecModeles();
   rendreStations();
+  masquerOverlayDemarrage();     // stations prêtes → on lève l'écran de chargement
 
   $("recherche-station").addEventListener("input", rendreStations);
   $("filtre-service").addEventListener("change", rendreStations);
+  $("filtre-mes-modeles").addEventListener("change", rendreStations);
+}
+
+// Ensemble des codes de stations qui ont DÉJÀ un modèle sur cet appareil.
+async function rafraichirCodesAvecModeles() {
+  try {
+    const inv = await api("/api/stockage");
+    etat.codesAvecModeles = new Set(
+      (inv.stations || []).filter((s) => (s.modeles || []).length).map((s) => s.code));
+  } catch (e) {
+    etat.codesAvecModeles = etat.codesAvecModeles || new Set();
+  }
+}
+
+function masquerOverlayDemarrage() {
+  const o = document.getElementById("overlay-chargement");
+  if (o) o.classList.add("fini");
 }
 
 function rendreStations() {
@@ -282,6 +302,8 @@ function rendreStations() {
   }
   const requete = $("recherche-station").value.trim().toLowerCase();
   const seulementService = $("filtre-service").checked;
+  const seulementMesModeles = $("filtre-mes-modeles").checked;
+  const codesModeles = etat.codesAvecModeles || new Set();
 
   if (clusterStations) carteStations.removeLayer(clusterStations);
   clusterStations = L.markerClusterGroup({ chunkedLoading: true });
@@ -289,6 +311,7 @@ function rendreStations() {
   let visibles = 0;
   for (const s of etat.stations) {
     if (seulementService && !s.en_service) continue;
+    if (seulementMesModeles && !codesModeles.has(s.code)) continue;
     if (requete) {
       const texte = `${s.nom} ${s.cours_eau || ""} ${s.code}`.toLowerCase();
       if (!texte.includes(requete)) continue;
@@ -497,6 +520,8 @@ function revenirCarte() {
   $("btn-retour").classList.add("cache");
   fermerReglages();
   etat.code = null;
+  // la station qu'on quitte a pu gagner un modèle → rafraîchir le filtre « Mes modèles »
+  rafraichirCodesAvecModeles().then(() => { if ($("filtre-mes-modeles").checked) rendreStations(); });
   setTimeout(() => carteStations && carteStations.invalidateSize(), 100);
 }
 
