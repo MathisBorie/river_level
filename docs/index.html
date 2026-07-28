@@ -245,12 +245,11 @@
         <label>Modèle de l'incertitude</label>
         <div class="champ-controle">
           <select id="opt-var-modele">
-            <option value="gradient_boosting">Gradient Boosting</option>
-            <option value="ridge">Ridge (linéaire, léger)</option>
-            <option value="foret">Forêt aléatoire</option>
+            <option value="gradient_boosting">Gradient Boosting quantile</option>
+            <option value="ridge">Ridge quantile (linéaire, plus lent)</option>
           </select>
         </div>
-        <span class="champ-aide">Le modèle qui apprend l'écart-type (haut et bas), séparément du modèle de débit.</span>
+        <span class="champ-aide">Modèle des bornes haute/basse (régression quantile, calibrée par conformal), séparé du modèle de débit.</span>
       </div>
 
       <div class="champ-reglage">
