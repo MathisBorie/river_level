@@ -97,7 +97,11 @@
         <div class="barre-controles">
           <label>Modèle <select id="prevision-modele"></select></label>
           <label>Jours <input id="prevision-jours" type="number" value="15" min="1" max="100"></label>
-          <label class="case"><input type="checkbox" id="prevision-hybride" checked> Intervalles</label>
+          <span class="ic-select">IC
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="prevision" value="50"> 50</label>
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="prevision" value="95" checked> 95</label>
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="prevision" value="99"> 99</label>
+          </span>
           <button id="btn-prevision" class="primaire">Prédire</button>
           <button class="info-btn" type="button" data-popover="pop-prevision" title="Détails et tableau">ⓘ</button>
         </div>
@@ -107,7 +111,9 @@
         </div>
         <div class="popover cache" id="pop-prevision">
           <p class="aide">Prévision du débit à partir d'aujourd'hui, avec sa marge d'incertitude (survole la courbe pour lire les valeurs).</p>
-          <div id="tableau-prevision"></div>
+          <p class="aide">Fiabilité R² par horizon :</p>
+          <div id="scores-detail-prevision"></div>
+          <div id="tableau-prevision" style="margin-top:10px"></div>
         </div>
       </div>
     </article>
@@ -125,7 +131,11 @@
           <label>Date <input id="backtest-date" type="date"></label>
           <span id="backtest-annees" class="ind"></span>
           <label>Jours <input id="backtest-jours" type="number" value="15" min="1" max="100"></label>
-          <label class="case"><input type="checkbox" id="backtest-hybride" checked> Intervalles</label>
+          <span class="ic-select">IC
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="backtest" value="50"> 50</label>
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="backtest" value="95" checked> 95</label>
+            <label class="case"><input type="checkbox" class="ic-niv" data-graphe="backtest" value="99"> 99</label>
+          </span>
           <button id="btn-backtest" class="primaire">Tester</button>
           <button class="info-btn" type="button" data-popover="pop-backtest" title="Scores par horizon">ⓘ</button>
         </div>

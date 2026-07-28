@@ -201,6 +201,8 @@ header h1::first-letter { }
 .corps-graphe { display: flex; flex-direction: column; overflow: hidden; position: relative; }
 .barre-controles { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 10px; }
 .barre-controles .info-btn { margin-left: auto; }
+.ic-select { display: inline-flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--encre-2); }
+.ic-select .case { gap: 3px; }
 .zone-graphe { flex: 1 1 auto; min-height: 0; position: relative; }
 .zone-graphe canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
 .graphe-vide {
