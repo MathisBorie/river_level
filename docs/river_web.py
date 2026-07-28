@@ -12,6 +12,7 @@ Python (STORE) le temps de la session.
 import time
 import os
 import io
+import gc
 import math
 import base64
 import asyncio
@@ -1164,6 +1165,11 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     n = len(df)
     if n < 50:
         raise ValueError(f"Trop peu de données exploitables ({n} lignes) sur cette période.")
+    # float32 au lieu de float64 : DIVISE PAR 2 la mémoire des matrices (crucial sur
+    # téléphone, où l'onglet est tué par manque de RAM). Précision largement suffisante.
+    df[feats] = df[feats].astype(np.float32)
+    df[targets] = df[targets].astype(np.float32)
+    del df_eau, df_meteo; gc.collect()          # on n'a plus besoin des données brutes
     Xm, Ym, Xs, Ys, Xe, Ye, test_df = _decouper3(df, feats, targets, mode_split, part_sigma, part_eval)
     log(f"Découpage {mode_split} : modèle {len(Xm)} j · écart-type {len(Xs)} j · évaluation {len(Xe)} j.")
     await asyncio.sleep(0)
@@ -1196,6 +1202,7 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                    "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon,
                             "vars_meteo": vm, "temp_mode": temp_mode,
                             "annees_test": sorted({int(y) for y in test_df["date"].dt.year.unique()})}}
+    del df; gc.collect()          # libère la grande table de features (mémoire, mobile)
     return {"nom_station": infos["nom"], "lignes": int(n), "n_points": len(coords),
             "resultats": resultats, "t_dl": t_dl, "t_fit": t_fit, "total": time.time() - t0,
             "dates_test": [d.strftime("%Y-%m-%d") for d in test_df["date"]]}

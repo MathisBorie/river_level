@@ -307,8 +307,14 @@ function rendreStations() {
   const codesModeles = etat.codesAvecModeles || new Set();
 
   if (clusterStations) carteStations.removeLayer(clusterStations);
-  clusterStations = L.markerClusterGroup({ chunkedLoading: true });
+  // Options économes en mémoire (mobile) : pas d'animation de cluster, on ne garde
+  // dans le DOM que les marqueurs visibles, clustering plus large.
+  clusterStations = L.markerClusterGroup({
+    chunkedLoading: true, removeOutsideVisibleBounds: true,
+    animate: false, animateAddingMarkers: false, maxClusterRadius: 90,
+  });
 
+  const marqueurs = [];
   let visibles = 0;
   for (const s of etat.stations) {
     if (seulementService && !s.en_service) continue;
@@ -319,12 +325,14 @@ function rendreStations() {
     }
     visibles++;
     const marqueur = L.marker([s.lat, s.lon]);
-    marqueur.bindPopup(
+    // Popup construit à la DEMANDE (au clic) — évite de générer des milliers de
+    // chaînes HTML d'un coup, ce qui saturait la mémoire sur téléphone.
+    marqueur.bindPopup(() =>
       `<b>${s.nom}</b><br>${s.cours_eau || ""}<br><code>${s.code}</code><br>` +
-      `<button class="primaire" onclick="ouvrirStation('${s.code}')">Ouvrir cette station →</button>`
-    );
-    clusterStations.addLayer(marqueur);
+      `<button class="primaire" onclick="ouvrirStation('${s.code}')">Ouvrir cette station →</button>`);
+    marqueurs.push(marqueur);
   }
+  clusterStations.addLayers(marqueurs);   // ajout en bloc (plus efficace que un par un)
   carteStations.addLayer(clusterStations);
   $("compteur-stations").textContent = `${visibles} stations`;
 }
@@ -425,9 +433,12 @@ async function chargerPeriodeDisponible() {
         $(id).min = p.debut;
         $(id).max = p.fin;
       }
-      // Par défaut : on démarre au max(1980, début des données) — les années
-      // trop anciennes sont souvent lacunaires et peu représentatives du climat actuel.
-      if (!$("opt-train-debut").value) $("opt-train-debut").value = (p.debut < "1980-01-01") ? "1980-01-01" : p.debut;
+      // Par défaut : on démarre au max(plancher, début des données) — les années
+      // trop anciennes sont lacunaires et peu représentatives du climat actuel.
+      // Sur MOBILE, plancher plus récent : moins de données = moins de mémoire
+      // (le téléchargement + les matrices d'une longue période font planter le tél.).
+      const plancher = (etat.capacites && etat.capacites.mobile) ? "2010-01-01" : "1980-01-01";
+      if (!$("opt-train-debut").value) $("opt-train-debut").value = (p.debut < plancher) ? plancher : p.debut;
       if (!$("opt-train-fin").value) $("opt-train-fin").value = p.fin;
       estimerCout();
     }
@@ -1494,13 +1505,20 @@ async function chargerConfig() {
 
 // -------------------------------------------------- détection des capacités de l'appareil
 // Sert à décider si le calcul parallèle (pool de workers Pyodide) vaut le coup.
+function estMobile() {
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+    (navigator.maxTouchPoints > 1 && window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+}
 function capacitesAppareil() {
   const coeurs = navigator.hardwareConcurrency || null;   // nb de threads logiques
   const memGo = navigator.deviceMemory || null;           // Go approx (Chrome/Edge seulement)
-  // Un pool coûte ~1 instance Pyodide (~100 Mo + démarrage) par worker. On ne le
-  // recommande que si la machine a de la marge : plusieurs cœurs ET assez de RAM.
+  const mobile = estMobile();
+  // Un pool coûte ~1 instance Pyodide (~100 Mo + démarrage) par worker. Sur mobile
+  // c'est la mort assurée (l'onglet est tué par manque de RAM) -> jamais de pool.
   let pool = 0, verdict;
-  if (coeurs && memGo) {
+  if (mobile) {
+    verdict = "mobile — parallélisme désactivé (mémoire limitée)";
+  } else if (coeurs && memGo) {
     if (coeurs >= 6 && memGo >= 8) { pool = Math.min(coeurs - 2, Math.floor(memGo / 3), 4); }
     verdict = pool >= 2
       ? `parallélisme envisageable (jusqu'à ${pool} workers)`
@@ -1511,7 +1529,7 @@ function capacitesAppareil() {
   } else {
     verdict = "capacités non détectables — parallélisme non recommandé";
   }
-  return { coeurs, memGo, pool, verdict };
+  return { coeurs, memGo, pool, mobile, verdict };
 }
 function rendreInfosAppareil() {
   const el = $("infos-appareil");
