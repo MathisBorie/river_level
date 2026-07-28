@@ -191,13 +191,13 @@
 
       <div class="champ-reglage">
         <label>Jours à prédire</label>
-        <div class="champ-controle"><input id="opt-predict-day" type="number" value="15" min="1" max="100"> jours</div>
+        <div class="champ-controle"><input id="opt-predict-day" type="number" value="30" min="1" max="365"> jours</div>
         <span class="champ-aide">L'horizon de la prévision. Au-delà de ~15 jours, la météo devient saisonnière.</span>
       </div>
 
       <div class="champ-reglage">
         <label>Jours d'historique en entrée</label>
-        <div class="champ-controle"><input id="opt-past-day" type="number" value="20" min="1" max="60"> jours</div>
+        <div class="champ-controle"><input id="opt-past-day" type="number" value="5" min="1" max="60"> jours</div>
         <span class="champ-aide">Combien de passé le modèle regarde pour faire sa prévision.</span>
       </div>
 
@@ -213,22 +213,38 @@
       </div>
 
       <div class="champ-reglage">
-        <label>Mesure de la fiabilité</label>
+        <label>Découpage des données</label>
         <div class="champ-controle">
           <select id="opt-mode-split">
             <option value="annees_aleatoires">années tirées au sort</option>
             <option value="chronologique">période la plus récente</option>
           </select>
-          <input id="opt-part-test" type="number" value="0.2" min="0.05" max="0.5" step="0.05"> de test
         </div>
-        <span class="champ-aide">Part des données mises de côté pour vérifier la précision du modèle.</span>
+        <div class="champ-controle" style="margin-top:6px">
+          écart-type <input id="opt-part-sigma" type="number" value="0.3" min="0.1" max="0.5" step="0.05">
+          · évaluation <input id="opt-part-eval" type="number" value="0.2" min="0.1" max="0.5" step="0.05">
+        </div>
+        <span class="champ-aide">Trois jeux séparés (pas de fuite) : le reste entraîne le <b>modèle</b>,
+          « écart-type » apprend l'<b>incertitude</b>, « évaluation » mesure sa <b>fiabilité réelle</b>.</span>
+      </div>
+
+      <div class="champ-reglage">
+        <label>Modèle de l'incertitude</label>
+        <div class="champ-controle">
+          <select id="opt-var-modele">
+            <option value="gradient_boosting">Gradient Boosting</option>
+            <option value="ridge">Ridge (linéaire, léger)</option>
+            <option value="foret">Forêt aléatoire</option>
+          </select>
+        </div>
+        <span class="champ-aide">Le modèle qui apprend l'écart-type (haut et bas), séparément du modèle de débit.</span>
       </div>
 
       <div class="champ-reglage">
         <label>Nombre de points météo</label>
         <div class="champ-controle">
-          <input id="opt-n-preselection" type="number" value="30" min="5" max="120"> candidats →
-          <input id="opt-n-final" type="number" value="5" min="1" max="20"> retenus
+          <input id="opt-n-preselection" type="number" value="40" min="5" max="120"> candidats →
+          <input id="opt-n-final" type="number" value="8" min="1" max="20"> retenus
         </div>
         <span class="champ-aide">Points d'où provient la météo. Plus de points = plus précis mais plus long.</span>
       </div>
@@ -283,9 +299,9 @@
       <p class="aide">Compresse les variables et montre combien de composantes suffisent pour garder l'énergie choisie.</p>
       <label class="ligne-modele">Énergie conservée :
         <select id="opt-pca-energie">
-          <option value="99" selected>99 %</option>
-          <option value="95">95 % (plus compressé)</option>
-          <option value="999">99,9 % (peu de perte)</option>
+          <option value="999" selected>99,9 %</option>
+          <option value="95">95 %</option>
+          <option value="99">99 %</option>
         </select>
       </label>
       <button id="btn-pca" class="secondaire">Appliquer la PCA</button>

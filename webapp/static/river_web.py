@@ -752,81 +752,157 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
     return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
-def _reg_variance(X, r, cote):
-    """Régresseur de variance d'UN côté : entraîné sur les résidus positifs (cote
-    'up') ou négatifs (cote 'down'), cible = résidu². Si un côté a trop peu de
-    points, on retombe sur tous les résidus (symétrique)."""
+MODELES_VAR = ("gradient_boosting", "ridge", "foret")
+NOMS_VAR = {"gradient_boosting": "Gradient Boosting", "ridge": "Ridge (linéaire)", "foret": "Forêt aléatoire"}
+
+
+def _reg_var_neuf(type_var):
+    """Régresseur qui apprend la variance (au choix de l'utilisateur)."""
+    if type_var == "ridge":
+        return Ridge(alpha=10.0)
+    if type_var == "foret":
+        from sklearn.ensemble import RandomForestRegressor
+        return RandomForestRegressor(n_estimators=60, max_depth=9, min_samples_leaf=20, n_jobs=1, random_state=42)
+    return HistGradientBoostingRegressor(max_iter=70, max_depth=3, max_leaf_nodes=15,
+                                         learning_rate=0.08, min_samples_leaf=40, l2_regularization=2.0,
+                                         early_stopping=True, validation_fraction=0.1, n_iter_no_change=8, random_state=42)
+
+
+def _reg_variance(X, r, cote, type_var):
+    """Régresseur de variance d'UN côté (résidus positifs 'up' / négatifs 'down'),
+    cible = résidu². Si un côté a trop peu de points, on prend tous les résidus."""
     masque = (r >= 0) if cote == "up" else (r < 0)
-    if masque.sum() < 50:
+    if masque.sum() < 40:
         masque = np.ones(len(r), dtype=bool)
-    # modèle de variance volontairement LÉGER (max_leaf_nodes/max_iter réduits) :
-    # divise par ~3 la mémoire et la taille sauvegardée (crashes mobiles), sans
-    # nuire sensiblement à la calibration des intervalles.
-    reg = HistGradientBoostingRegressor(max_iter=70, max_depth=3, max_leaf_nodes=15,
-                                        learning_rate=0.08, min_samples_leaf=40,
-                                        l2_regularization=2.0, early_stopping=True,
-                                        validation_fraction=0.1, n_iter_no_change=8, random_state=42)
+    reg = _reg_var_neuf(type_var)
     reg.fit(X[masque], r[masque] ** 2)
     return reg
 
 
-async def _fit_variance(base, Xtr, Ytr, targets, prog=None, arret=None):
-    """Incertitude ASYMÉTRIQUE (sklearn, sans TensorFlow) : deux régresseurs de
-    variance par horizon — un pour les dépassements vers le HAUT (résidus > 0),
-    un pour vers le BAS (résidus < 0). Ex. rivière basse + pluie : grosse marge
-    au-dessus de la prévision, faible en-dessous. Renvoie {"up": [...], "down": [...]}."""
-    prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
-    resid = Ytr.values - base.predict(Xtr)
-    nh = len(targets); ups, downs = [], []
-    for i in range(nh):
-        arret()
-        r = resid[:, i]
-        ups.append(_reg_variance(Xtr, r, "up"))
-        downs.append(_reg_variance(Xtr, r, "down"))
-        prog("Estimation de l'incertitude", int((i + 1) / nh * 100), i + 1, nh)
-        if i % 2 == 0:
-            await asyncio.sleep(0)
-    return {"up": ups, "down": downs}
-
-
-# z-scores des niveaux d'intervalle de confiance
-_IC_NIVEAUX = (("50", 0.674), ("95", 1.960), ("99", 2.576))
+# niveaux d'IC et alpha correspondant (couverture visée = 1 - alpha)
+_IC_ALPHA = (("50", 0.50), ("95", 0.05), ("99", 0.01))
 
 
 def _sigmas_ligne(regs, X, horizons):
-    """(sigma_haut, sigma_bas) pour une seule ligne X, par horizon."""
+    """(sigma_haut, sigma_bas) pour UNE ligne X, par horizon."""
     up, down = regs["up"], regs["down"]
-    return {h: (float(np.sqrt(max(1e-9, up[h].predict(X)[0]))),
-                float(np.sqrt(max(1e-9, down[h].predict(X)[0])))) for h in horizons}
+    return {h: (float(np.sqrt(max(1e-12, up[h].predict(X)[0]))),
+                float(np.sqrt(max(1e-12, down[h].predict(X)[0])))) for h in horizons}
 
 
-def _decouper(df, feats, targets, mode_split, part_test):
-    """Découpe train/test : soit des ANNÉES entières tirées au sort (évite qu'une
-    saison entière du test ressemble trop au train), soit la période la plus
-    récente (chronologique). Renvoie Xtr, Xte, Ytr, Yte, test_df."""
-    part_test = min(0.5, max(0.05, float(part_test)))
+def _sigmas_mat(regs, X):
+    """(sigma_haut, sigma_bas) matriciels (n, H) pour tout X."""
+    up = np.column_stack([np.sqrt(np.clip(r.predict(X), 1e-12, None)) for r in regs["up"]])
+    dn = np.column_stack([np.sqrt(np.clip(r.predict(X), 1e-12, None)) for r in regs["down"]])
+    return up, dn
+
+
+_Z_IC = {"50": 0.674, "95": 1.960, "99": 2.576}
+
+
+def _ic_par_horizon(regs, X, pred, horizons):
+    """{niv: {h: (bas, haut)}} en L/s pour une ligne X. Utilise les facteurs
+    conformes si présents (q_up/q_down), sinon l'ancien z-score (rétro-compat)."""
+    sig = _sigmas_ligne(regs, X, horizons)
+    conforme = "q_up" in regs
+    out = {}
+    for niv, _a in _IC_ALPHA:
+        d = {}
+        for h in horizons:
+            su, sd = sig[h]
+            if conforme:
+                bas = pred[h] + regs["q_down"][niv][h] * sd
+                haut = pred[h] + regs["q_up"][niv][h] * su
+            else:
+                z = _Z_IC[niv]
+                bas = pred[h] - z * sd; haut = pred[h] + z * su
+            d[h] = (max(0.0, float(bas)), float(haut))
+        out[niv] = d
+    return out
+
+
+async def _fit_incertitude(base, Xs, Ys, Xe, Ye, targets, type_var="gradient_boosting", prog=None, arret=None):
+    """Incertitude CONFORME et ASYMÉTRIQUE, SANS fuite de données :
+      • σ_haut / σ_bas appris sur le jeu ÉCART-TYPE (résidus hors-échantillon du
+        modèle) avec le modèle de variance choisi (type_var) ;
+      • facteurs conformes q_haut/q_bas par niveau = quantiles des résidus
+        normalisés (calibrent la largeur pour une vraie couverture) ;
+      • couverture RÉELLE mesurée sur le jeu ÉVALUATION (jamais vu)."""
+    prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
+    nh = len(targets)
+    resid_s = Ys.values - base.predict(Xs)
+    ups, downs = [], []
+    for i in range(nh):
+        arret()
+        r = resid_s[:, i]
+        ups.append(_reg_variance(Xs, r, "up", type_var))
+        downs.append(_reg_variance(Xs, r, "down", type_var))
+        prog("Incertitude (conforme)", int((i + 1) / nh * 100), i + 1, nh)
+        if i % 2 == 0:
+            await asyncio.sleep(0)
+    regs = {"up": ups, "down": downs, "type_var": type_var}
+
+    # --- calibration conforme sur le jeu écart-type (résidus normalisés) ---
+    sig_up_s, sig_dn_s = _sigmas_mat(regs, Xs)
+    su = resid_s / sig_up_s
+    sd = resid_s / sig_dn_s
+    ns = max(1, len(resid_s))
+    q_up, q_down = {}, {}
+    for niv, alpha in _IC_ALPHA:
+        hi = min(1.0, (1 - alpha / 2) * (ns + 1) / ns)
+        lo = max(0.0, (alpha / 2) * (ns + 1) / ns)
+        q_up[niv] = [float(np.quantile(su[:, h], hi)) for h in range(nh)]
+        q_down[niv] = [float(np.quantile(sd[:, h], lo)) for h in range(nh)]
+    regs["q_up"] = q_up; regs["q_down"] = q_down
+
+    # --- couverture réelle sur le jeu d'évaluation (honnête) ---
+    couverture = {}
+    if Xe is not None and len(Xe):
+        resid_e = Ye.values - base.predict(Xe)
+        sig_up_e, sig_dn_e = _sigmas_mat(regs, Xe)
+        for niv, _a in _IC_ALPHA:
+            qu = np.array(q_up[niv]); qd = np.array(q_down[niv])
+            dedans = (resid_e <= qu * sig_up_e) & (resid_e >= qd * sig_dn_e)
+            couverture[niv] = round(float(dedans.mean()) * 100, 1)
+    regs["couverture"] = couverture
+    return regs
+
+
+def _decouper3(df, feats, targets, mode_split, part_sigma, part_eval):
+    """Découpe en TROIS jeux disjoints pour éviter les fuites : MODÈLE (le reste),
+    ÉCART-TYPE (part_sigma) et ÉVALUATION (part_eval). Par années tirées au sort
+    ou chronologiquement. Renvoie (Xm,Ym, Xs,Ys, Xe,Ye, eval_df)."""
+    part_sigma = min(0.6, max(0.1, float(part_sigma)))
+    part_eval = min(0.6, max(0.1, float(part_eval)))
+    if part_sigma + part_eval > 0.9:            # garder ≥10 % pour le modèle
+        f = 0.9 / (part_sigma + part_eval); part_sigma *= f; part_eval *= f
     n = len(df)
+    grp = np.zeros(n, dtype=int)                # 0 = modèle, 1 = écart-type, 2 = éval
     if mode_split == "chronologique":
-        split = int(n * (1 - part_test))
-        masque = np.zeros(n, dtype=bool); masque[split:] = True
+        i1 = int(n * (1 - part_sigma - part_eval)); i2 = int(n * (1 - part_eval))
+        grp[i1:i2] = 1; grp[i2:] = 2
     else:  # annees_aleatoires
         annees = df["date"].dt.year.values
         uniques = np.array(sorted(set(annees)))
-        rng = np.random.default_rng(42)
-        n_test = max(1, min(len(uniques) - 1, round(len(uniques) * part_test)))
-        annees_test = set(rng.choice(uniques, size=n_test, replace=False))
-        masque = np.array([a in annees_test for a in annees])
-        if masque.all() or not masque.any():   # garde-fou
-            split = int(n * (1 - part_test)); masque = np.zeros(n, dtype=bool); masque[split:] = True
-    Xtr, Xte = df[feats][~masque], df[feats][masque]
-    Ytr, Yte = df[targets][~masque], df[targets][masque]
-    return Xtr, Xte, Ytr, Yte, df[masque].reset_index(drop=True)
+        rng = np.random.default_rng(42); rng.shuffle(uniques)
+        n_sig = max(1, round(len(uniques) * part_sigma))
+        n_ev = max(1, round(len(uniques) * part_eval))
+        a_sig, a_ev = set(uniques[:n_sig]), set(uniques[n_sig:n_sig + n_ev])
+        grp = np.array([1 if a in a_sig else (2 if a in a_ev else 0) for a in annees])
+        if not (grp == 0).any():                # garde-fou : modèle non vide
+            grp = np.zeros(n, dtype=int)
+            i1 = int(n * (1 - part_sigma - part_eval)); i2 = int(n * (1 - part_eval))
+            grp[i1:i2] = 1; grp[i2:] = 2
+    mm, ms, me = grp == 0, grp == 1, grp == 2
+    return (df[feats][mm], df[targets][mm], df[feats][ms], df[targets][ms],
+            df[feats][me], df[targets][me], df[me].reset_index(drop=True))
 
 
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
                     log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99,
-                    mode_split="annees_aleatoires", part_test=0.2, temp_mode="moyenne"):
+                    mode_split="annees_aleatoires", part_test=0.2, temp_mode="moyenne",
+                    var_modele="gradient_boosting", part_sigma=0.3, part_eval=0.2):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
     arret = arret or (lambda: None)
@@ -858,8 +934,8 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
     n = len(df)
     if n < 50:
         raise ValueError(f"Trop peu de données exploitables ({n} lignes) sur cette période.")
-    Xtr, Xte, Ytr, Yte, test_df = _decouper(df, feats, targets, mode_split, part_test)
-    log(f"Découpage {mode_split} : {len(Xtr)} jours d'entraînement, {len(Xte)} de test.")
+    Xm, Ym, Xs, Ys, Xe, Ye, test_df = _decouper3(df, feats, targets, mode_split, part_sigma, part_eval)
+    log(f"Découpage {mode_split} : modèle {len(Xm)} j · écart-type {len(Xs)} j · évaluation {len(Xe)} j.")
     await asyncio.sleep(0)
 
     resultats, objets, variances = {}, {}, {}
@@ -870,19 +946,22 @@ async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
         prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
         log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
         await asyncio.sleep(0)
-        m, sc = await _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog, arret, idx, nb, seuil_pca)
+        m, sc = await _fit_modele(nom, Xm, Ym, Xe, Ye, targets, prog, arret, idx, nb, seuil_pca)
         if m is None:
             continue
         objets[nom] = m
         resultats[nom] = sc
-        log("Estimation des intervalles de confiance…")
-        variances[nom] = await _fit_variance(m, Xtr, Ytr, targets, prog, arret)
+        log(f"Estimation de l'incertitude (conforme, modèle : {NOMS_VAR.get(var_modele, var_modele)})…")
+        variances[nom] = await _fit_incertitude(m, Xs, Ys, Xe, Ye, targets, var_modele, prog, arret)
+        cov = variances[nom].get("couverture", {})
+        if cov.get("95") is not None:
+            log(f"   couverture réelle de l'IC 95% (sur l'évaluation) : {cov['95']} %")
     t_fit = time.time() - tf
     prog("Entraînement terminé", 100)
 
     STORE[code] = {"test": test_df, "feats": feats, "targets": targets, "modeles": objets,
                    # données gardées en mémoire pour ré-entraîner un autre modèle sans re-télécharger
-                   "data": {"Xtr": Xtr, "Ytr": Ytr, "Xte": Xte, "Yte": Yte},
+                   "data": {"Xm": Xm, "Ym": Ym, "Xs": Xs, "Ys": Ys, "Xe": Xe, "Ye": Ye},
                    "scores": resultats, "variance": variances,
                    "meta": {"nom": infos["nom"], "coords": coords, "past": past, "horizon": horizon,
                             "vars_meteo": vm, "temp_mode": temp_mode,
@@ -967,7 +1046,10 @@ async def _run_points(jid, code, body):
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
-                               temp_mode=body.get("temp_mode", "moyenne"))
+                               temp_mode=body.get("temp_mode", "moyenne"),
+                               var_modele=body.get("var_modele", "gradient_boosting"),
+                               part_sigma=float(body.get("part_sigma") or 0.3),
+                               part_eval=float(body.get("part_eval") or 0.2))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé)")
@@ -981,11 +1063,11 @@ async def _run_points(jid, code, body):
         log("❌ " + traceback.format_exc()[-700:]); job["statut"] = "erreur"
 
 
-async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99):
+async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99, var_modele="gradient_boosting"):
     """Entraîne un/des modèle(s) SUPPLÉMENTAIRE(S) sur les données déjà en mémoire
     (aucun re-téléchargement) et les ajoute à STORE[code]."""
     st = STORE.get(code)
-    if not st or "data" not in st:
+    if not st or "data" not in st or "Xm" not in st.get("data", {}):
         raise ValueError("Les données d'entraînement ne sont plus en mémoire (modèle rechargé ou importé). "
                          "Ré-analyse la rivière pour entraîner d'autres modèles.")
     d = st["data"]; targets = st["targets"]; nb = len(noms)
@@ -994,24 +1076,24 @@ async def ajouter_modeles(code, noms, log, prog, arret, seuil_pca=99):
         prog(f"Entraînement : {NOMS_MODELE.get(nom, nom)}", int(idx / nb * 100), idx + 1, nb)
         log(f"Entraînement : {NOMS_MODELE.get(nom, nom)}…")
         await asyncio.sleep(0)
-        m, sc = await _fit_modele(nom, d["Xtr"], d["Ytr"], d["Xte"], d["Yte"], targets, prog, arret, idx, nb, seuil_pca)
+        m, sc = await _fit_modele(nom, d["Xm"], d["Ym"], d["Xe"], d["Ye"], targets, prog, arret, idx, nb, seuil_pca)
         if m is None:
             continue
         st["modeles"][nom] = m; st["scores"][nom] = sc
-        st.setdefault("variance", {})[nom] = await _fit_variance(m, d["Xtr"], d["Ytr"], targets, prog, arret)
+        st.setdefault("variance", {})[nom] = await _fit_incertitude(m, d["Xs"], d["Ys"], d["Xe"], d["Ye"], targets, var_modele, prog, arret)
         log(f"   → {NOMS_MODELE.get(nom, nom)} : fiabilité {sc['r2'] * 100:.0f} %")
     prog("Terminé", 100)
     return {"modeles": list(st["scores"].keys())}
 
 
-async def _run_ajouter(jid, code, noms, seuil_pca=99):
+async def _run_ajouter(jid, code, noms, seuil_pca=99, var_modele="gradient_boosting"):
     job = JOBS[jid]
     log, prog, arret = _cbs(job)
     try:
         noms = [n for n in noms if n in MODELES_DISPO]
         if not noms:
             raise ValueError("Aucun modèle valide à entraîner.")
-        job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret, seuil_pca=seuil_pca)
+        job["resultat"] = await ajouter_modeles(code, noms, log, prog, arret, seuil_pca=seuil_pca, var_modele=var_modele)
         _sauver(code)
         log("✅ Terminé (sauvegardé sur cet appareil).")
         job["statut"] = "termine"
@@ -1070,7 +1152,10 @@ async def _run_pipeline(jid, code, body):
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
-                               temp_mode=body.get("temp_mode", "moyenne"))
+                               temp_mode=body.get("temp_mode", "moyenne"),
+                               var_modele=body.get("var_modele", "gradient_boosting"),
+                               part_sigma=float(body.get("part_sigma") or 0.3),
+                               part_eval=float(body.get("part_eval") or 0.2))
         sc = info["resultats"].get(modele, {})
         _sauver(code)
         log(f"✅ Modèle {NOMS_MODELE.get(modele, modele)} prêt — fiabilité {sc.get('r2', 0) * 100:.0f} % (sauvegardé sur cet appareil)")
@@ -1136,19 +1221,22 @@ async def backtest(code, modele, date_str, nb_jours=None, hybride=True):
     pts = [{"date": d.strftime("%Y-%m-%d"),
             "prev": float(v) / D, "reel": float(r) / D}
            for d, v, r in zip(dates, [debit0] + list(pred), [debit0] + list(vrai))]
-    # intervalles de confiance (si l'incertitude asymétrique a été apprise)
+    # intervalles de confiance (conformes si dispo, sinon z-score ; asymétriques)
     regs = st.get("variance", {}).get(modele) if hybride else None
     hybride = False
-    if isinstance(regs, dict):   # dict {up, down} = nouveau format asymétrique
+    couverture = None
+    if isinstance(regs, dict):
         hybride = True
-        sig = _sigmas_ligne(regs, X, range(h_max + 1))   # sig[h] = (haut, bas)
-        for niv, z in _IC_NIVEAUX:
-            bas = [debit0] + [max(0.0, pred[h] - z * sig[h][1]) for h in range(h_max + 1)]
-            haut = [debit0] + [pred[h] + z * sig[h][0] for h in range(h_max + 1)]
+        couverture = regs.get("couverture")
+        ic = _ic_par_horizon(regs, X, pred, range(h_max + 1))
+        for niv, _a in _IC_ALPHA:
             for k, p in enumerate(pts):
-                p[f"ic{niv}_bas"] = float(bas[k]) / D
-                p[f"ic{niv}_haut"] = float(haut[k]) / D
-    return {"pivot": date.strftime("%Y-%m-%d"), "hybride": hybride,
+                if k == 0:
+                    p[f"ic{niv}_bas"] = p[f"ic{niv}_haut"] = float(debit0) / D
+                else:
+                    bas, haut = ic[niv][k - 1]
+                    p[f"ic{niv}_bas"] = bas / D; p[f"ic{niv}_haut"] = haut / D
+    return {"pivot": date.strftime("%Y-%m-%d"), "hybride": hybride, "couverture": couverture,
             "observe": [{"date": d.strftime("%Y-%m-%d"), "debit": float(x) / D}
                         for d, x in zip(contexte["date"], contexte["debit_L_s"])],
             "points": pts}
@@ -1221,20 +1309,21 @@ async def prevision(code, modele, nb_jours=None, hybride=True):
     for h in horizons:
         d = date_J0 + pd.Timedelta(days=h)
         points.append({"date": d.strftime("%Y-%m-%d"), "prev": float(pred[h]) / D})
-    # intervalles de confiance (si l'incertitude asymétrique a été apprise)
+    # intervalles de confiance (conformes si dispo ; asymétriques)
     regs = st.get("variance", {}).get(modele) if hybride else None
     hybride = False
-    if isinstance(regs, dict):   # dict {up, down} = nouveau format asymétrique
+    couverture = None
+    if isinstance(regs, dict):
         hybride = True
-        sig = _sigmas_ligne(regs, X, horizons)   # sig[h] = (haut, bas)
-        for niv, z in _IC_NIVEAUX:
-            points[0][f"ic{niv}_bas"] = debit0 / D
-            points[0][f"ic{niv}_haut"] = debit0 / D
+        couverture = regs.get("couverture")
+        ic = _ic_par_horizon(regs, X, pred, horizons)
+        for niv, _a in _IC_ALPHA:
+            points[0][f"ic{niv}_bas"] = points[0][f"ic{niv}_haut"] = debit0 / D
             for k, h in enumerate(horizons, start=1):
-                points[k][f"ic{niv}_bas"] = max(0.0, pred[h] - z * sig[h][1]) / D
-                points[k][f"ic{niv}_haut"] = (pred[h] + z * sig[h][0]) / D
+                bas, haut = ic[niv][h]
+                points[k][f"ic{niv}_bas"] = bas / D; points[k][f"ic{niv}_haut"] = haut / D
     sc = st["scores"].get(modele, {})
-    return {"pivot": today.strftime("%Y-%m-%d"), "hybride": hybride,
+    return {"pivot": today.strftime("%Y-%m-%d"), "hybride": hybride, "couverture": couverture,
             "observe": observe, "points": points, "modele": modele,
             "score": sc.get("r2"), "scores_detail": sc.get("detail"), "unite": "m³/s"}
 
@@ -1301,8 +1390,10 @@ async def etat(code):
     if st:
         variance = st.get("variance", {})
         for nom, r in st.get("scores", {}).items():
+            v = variance.get(nom)
             modeles.append({"nom": nom, "score": r["r2"], "espace": "brut",
-                            "hybride": isinstance(variance.get(nom), dict)})
+                            "hybride": isinstance(v, dict),
+                            "couverture": v.get("couverture") if isinstance(v, dict) else None})
     # points finaux : la sélection auto/manuelle si elle existe, sinon ceux de l'entraînement
     coords_finales = None
     if sel and sel.get("coords_finales"):
@@ -1450,13 +1541,15 @@ async def _traiter(method, path, body):
     if m and method == "POST":
         jid = _job_nouveau("entrainer", m.group(1))
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), [body.get("modele")],
-                                           seuil_pca=float(body.get("seuil_energie") or 99)))
+                                           seuil_pca=float(body.get("seuil_energie") or 99),
+                                           var_modele=body.get("var_modele", "gradient_boosting")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/entrainer$", p)
     if m and method == "POST":
         jid = _job_nouveau("entrainer", m.group(1))
         asyncio.ensure_future(_run_ajouter(jid, m.group(1), body.get("modeles") or [],
-                                           seuil_pca=float(body.get("seuil_energie") or 99)))
+                                           seuil_pca=float(body.get("seuil_energie") or 99),
+                                           var_modele=body.get("var_modele", "gradient_boosting")))
         return _json.dumps({"job_id": jid})
     m = re.match(r"^/api/riviere/([^/]+)/sauvegarder$", p)
     if m and method == "POST":
