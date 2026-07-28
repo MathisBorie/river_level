@@ -919,29 +919,67 @@ def _ic_par_horizon(regs, X, pred, horizons):
     return out
 
 
-async def _fit_ensemble_mc(Xm, Ym, prog=None, arret=None, n=6):
-    """Ensemble profond « façon MC Dropout » sans TensorFlow : n petits réseaux de
-    neurones (MLP), chacun entraîné sur un TIRAGE différent des données (bootstrap)
-    + une graine différente. Leur DÉSACCORD point par point donne l'incertitude —
-    même idée Monte-Carlo que le dropout (moyenne + écart-type d'un modèle
-    stochastique), mais avec plusieurs réseaux au lieu d'un seul tiré N fois.
-    Multi-sortie (tous les horizons d'un coup) : n entraînements suffisent."""
+def _mc_membre_neuf(i):
+    """Un réseau (MLP normalisé, cible normalisée) de l'ensemble Monte Carlo.
+    CONFIG IDENTIQUE côté séquentiel ET côté worker parallèle (mc_worker.js) :
+    ne pas diverger, sinon les deux chemins donneraient des modèles différents."""
     from sklearn.neural_network import MLPRegressor
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
     from sklearn.compose import TransformedTargetRegressor
+    reseau = make_pipeline(
+        StandardScaler(),                                  # les réseaux ont besoin de features normalisées
+        MLPRegressor(hidden_layer_sizes=(64, 32), alpha=1e-3, learning_rate_init=0.005,
+                     max_iter=300, early_stopping=True, n_iter_no_change=12, random_state=i))
+    return TransformedTargetRegressor(regressor=reseau, transformer=StandardScaler())
+
+
+async def _ensemble_mc_parallele(Xm, Ym, n, prog):
+    """Entraîne les membres via le POOL de workers Pyodide (JS), en parallèle. Seuls
+    des OCTETS traversent la frontière : données (npy) → workers, modèles (joblib)
+    ← workers. L'appelant gère le repli séquentiel si ça échoue."""
+    import io, js
+    from pyodide.ffi import to_js
+    bx = io.BytesIO(); np.save(bx, np.ascontiguousarray(Xm.values, dtype=np.float64))
+    by = io.BytesIO(); np.save(by, np.ascontiguousarray(Ym.values, dtype=np.float64))
+    prog("Incertitude (Monte Carlo parallèle)", 10, 0, n)
+    res = await js.entrainerMCParallele(to_js(bx.getvalue()), to_js(by.getvalue()), int(n))
+    ens = [joblib.load(io.BytesIO(bytes(m.to_py()))) for m in res]
+    prog("Incertitude (Monte Carlo parallèle)", 100, n, n)
+    if len(ens) != n:
+        raise RuntimeError("pool: nombre de modèles inattendu")
+    return ens
+
+
+async def _fit_ensemble_mc(Xm, Ym, prog=None, arret=None, n=6):
+    """Ensemble profond « façon MC Dropout » sans TensorFlow : n réseaux (MLP),
+    chacun sur un TIRAGE bootstrap + graine différente (reproductible par membre :
+    graine 1000+i). Leur DÉSACCORD point par point donne l'incertitude. Essaie le
+    POOL de workers parallèles si l'appareil le permet (js.mcPoolActif ≥ 2), sinon
+    séquentiel (défaut éprouvé). Repli séquentiel automatique si le pool échoue."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
-    rng = np.random.default_rng(42)
+    # --- tentative PARALLÈLE (pool) si activé côté navigateur ---
+    taille = 0
+    try:
+        import js
+        if hasattr(js, "mcPoolActif"):
+            taille = int(js.mcPoolActif())
+    except Exception:
+        taille = 0
+    if taille >= 2:
+        try:
+            return await _ensemble_mc_parallele(Xm, Ym, n, prog)
+        except Exception as e:
+            prog(f"Pool indisponible ({e}) — calcul séquentiel", None)
+    # --- SÉQUENTIEL (défaut) ---
+    Xv = np.ascontiguousarray(Xm.values, dtype=np.float64)
+    Yv = np.ascontiguousarray(Ym.values, dtype=np.float64)
     ens = []
     for i in range(n):
         arret()
-        idx = rng.choice(len(Xm), len(Xm), replace=True)   # bootstrap = source de variabilité
-        reseau = make_pipeline(
-            StandardScaler(),                              # les réseaux ont besoin de features normalisées
-            MLPRegressor(hidden_layer_sizes=(64, 32), alpha=1e-3, learning_rate_init=0.005,
-                         max_iter=300, early_stopping=True, n_iter_no_change=12, random_state=i))
-        mdl = TransformedTargetRegressor(regressor=reseau, transformer=StandardScaler())  # cible normalisée aussi
-        mdl.fit(Xm.iloc[idx], Ym.iloc[idx])
+        idx = np.random.default_rng(1000 + i).integers(0, len(Xv), len(Xv))   # bootstrap reproductible par membre
+        mdl = _mc_membre_neuf(i)
+        mdl.fit(Xv[idx], Yv[idx])
         ens.append(mdl)
         prog("Incertitude (Monte Carlo)", int((i + 1) / n * 100), i + 1, n)
         await asyncio.sleep(0)

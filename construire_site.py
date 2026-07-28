@@ -30,7 +30,7 @@ html = html.replace('href="/static/', 'href="').replace('src="/static/', 'src="'
 (DOCS / "index.html").write_text(html, encoding="utf-8")
 
 # 2) fichiers moteur (déjà en URLs relatives entre eux)
-for f in ["style.css", "app.js", "client_boot.js", "pyodide_worker.js", "river_web.py"]:
+for f in ["style.css", "app.js", "client_boot.js", "pyodide_worker.js", "mc_worker.js", "river_web.py"]:
     shutil.copy(STATIC / f, DOCS / f)
 
 # 3) empêche GitHub Pages de passer les fichiers dans Jekyll (sinon river_web.py ignoré)

@@ -33,8 +33,51 @@ function graverSiBesoin() {
 }
 const initProm = init().catch((e) => postMessage({ type: "erreur-init", error: String(e) }));
 
+// ---- pool Monte Carlo : parallélisme CPU optionnel (plusieurs sous-workers) ----
+// Chaque sous-worker (mc_worker.js) a sa propre instance Pyodide. Exposé à Python
+// via self.mcPoolActif()/self.entrainerMCParallele() ; river_web.py replie en
+// séquentiel si mcPoolActif() < 2 ou si un appel échoue.
+let mcTaille = 0, mcPool = [], mcSeq = 0;
+const mcCb = {};
+self.mcPoolActif = () => mcTaille;
+self.mcConfigPool = (t) => { mcTaille = (t | 0); };
+
+function mcSpawn() {
+  while (mcPool.length < mcTaille) {
+    const w = new Worker(new URL("mc_worker.js", self.location.href));
+    w.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === "pret" || d.type === "erreur") return;
+      const cb = mcCb[d.id]; if (!cb) return; delete mcCb[d.id];
+      d.ok ? cb.res(d.modeles) : cb.rej(new Error(d.error));
+    };
+    mcPool.push(w);
+  }
+}
+function mcTache(w, xb, yb, seeds) {
+  const id = ++mcSeq;
+  return new Promise((res, rej) => {
+    mcCb[id] = { res, rej };
+    w.postMessage({ id, xb, yb, seeds });   // clone (pas de transfert : mêmes données pour tous les workers)
+  });
+}
+// Appelée depuis Python : renvoie une liste (aplatie, dans l'ordre) de modèles (Uint8Array).
+self.entrainerMCParallele = async (xb, yb, n) => {
+  if (mcTaille < 2) throw new Error("pool inactif");
+  mcSpawn();
+  const k = Math.min(mcTaille, n);
+  const paquets = Array.from({ length: k }, () => []);
+  for (let i = 0; i < n; i++) paquets[i % k].push(i);     // répartit les membres sur les workers
+  const parPaquet = await Promise.all(paquets.map((seeds, j) => mcTache(mcPool[j], xb, yb, seeds)));
+  const out = new Array(n);
+  paquets.forEach((seeds, j) => seeds.forEach((idx, t) => { out[idx] = parPaquet[j][t]; }));
+  return out;
+};
+
 onmessage = async (e) => {
   const { id, type } = e.data;
+  // --- configuration du pool parallèle (taille décidée par l'appareil + réglage) ---
+  if (type === "config-pool") { self.mcConfigPool(e.data.taille); return; }
   // --- chemins BINAIRES (export/import de modèle) : octets bruts, transférés
   //     sans copie, pour ne pas saturer la mémoire (téléphones). ---
   if (type === "exporter" || type === "importer") {
