@@ -783,18 +783,40 @@ def _reg_variance(X, r, cote, type_var):
 _IC_ALPHA = (("50", 0.50), ("95", 0.05), ("99", 0.01))
 
 
+def _bornes(regs):
+    """Plancher/plafond de VARIANCE par horizon (évite σ≈0 qui fait exploser les
+    facteurs conformes, et σ énorme qui donne des IC délirants). None si absent."""
+    vb = regs.get("var_bornes")
+    if vb:
+        return np.asarray(vb["floor"], float), np.asarray(vb["cap"], float)
+    return None, None
+
+
+def _borne_var(v, fl, cp, h):
+    """Borne UNE variance (scalaire) à l'horizon h."""
+    if fl is not None:
+        return min(max(float(v), float(fl[h])), float(cp[h]))
+    return max(1e-12, float(v))
+
+
 def _sigmas_ligne(regs, X, horizons):
-    """(sigma_haut, sigma_bas) pour UNE ligne X, par horizon."""
+    """(sigma_haut, sigma_bas) pour UNE ligne X, par horizon (variances bornées)."""
     up, down = regs["up"], regs["down"]
-    return {h: (float(np.sqrt(max(1e-12, up[h].predict(X)[0]))),
-                float(np.sqrt(max(1e-12, down[h].predict(X)[0])))) for h in horizons}
+    fl, cp = _bornes(regs)
+    return {h: (float(np.sqrt(_borne_var(up[h].predict(X)[0], fl, cp, h))),
+                float(np.sqrt(_borne_var(down[h].predict(X)[0], fl, cp, h)))) for h in horizons}
 
 
 def _sigmas_mat(regs, X):
-    """(sigma_haut, sigma_bas) matriciels (n, H) pour tout X."""
-    up = np.column_stack([np.sqrt(np.clip(r.predict(X), 1e-12, None)) for r in regs["up"]])
-    dn = np.column_stack([np.sqrt(np.clip(r.predict(X), 1e-12, None)) for r in regs["down"]])
-    return up, dn
+    """(sigma_haut, sigma_bas) matriciels (n, H) pour tout X (variances bornées)."""
+    fl, cp = _bornes(regs)
+    up = np.column_stack([r.predict(X) for r in regs["up"]])
+    dn = np.column_stack([r.predict(X) for r in regs["down"]])
+    if fl is not None:
+        up = np.clip(up, fl, cp); dn = np.clip(dn, fl, cp)
+    else:
+        up = np.clip(up, 1e-12, None); dn = np.clip(dn, 1e-12, None)
+    return np.sqrt(up), np.sqrt(dn)
 
 
 _Z_IC = {"50": 0.674, "95": 1.960, "99": 2.576}
@@ -842,7 +864,15 @@ async def _fit_incertitude(base, Xs, Ys, Xe, Ye, targets, type_var="gradient_boo
             await asyncio.sleep(0)
     regs = {"up": ups, "down": downs, "type_var": type_var}
 
-    # --- calibration conforme sur le jeu écart-type (résidus normalisés) ---
+    # --- bornes de variance par horizon (σ ∈ [0,1·RMS , 4·max|résidu|]) : sans
+    #     cela, un σ prédit ≈ 0 fait exploser r/σ et donne des IC en milliards ---
+    rms2 = np.mean(resid_s ** 2, axis=0)                 # (H,)
+    rmax = np.max(np.abs(resid_s), axis=0)               # (H,)
+    var_floor = np.maximum(1e-6, 0.01 * rms2)            # σ ≥ 0,1·RMS
+    var_cap = np.maximum(4.0 * rms2, (4.0 * rmax) ** 2)  # σ ≤ ~4·max|résidu|
+    regs["var_bornes"] = {"floor": var_floor.tolist(), "cap": var_cap.tolist()}
+
+    # --- calibration conforme sur le jeu écart-type (résidus normalisés bornés) ---
     sig_up_s, sig_dn_s = _sigmas_mat(regs, Xs)
     su = resid_s / sig_up_s
     sd = resid_s / sig_dn_s
