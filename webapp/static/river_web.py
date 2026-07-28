@@ -869,6 +869,8 @@ def _ic_par_horizon(regs, X, pred, horizons):
                 bas = lo - qbn[h]; haut = hi + qhn[h]    # Q<0 au 50% -> resserre ; Q>0 au 99% -> élargit
                 if bas > haut:                            # 50% resserré au point de croiser -> point médian
                     bas = haut = 0.5 * (bas + haut)
+                if niv != "50":                           # la prévision reste TOUJOURS dans le 95/99 ; le 50%
+                    bas = min(bas, pred[h]); haut = max(haut, pred[h])  # peut être décentré si l'aléa est asymétrique
                 d[h] = (max(0.0, bas), max(0.0, haut))
             out[niv] = d
         return out
@@ -935,13 +937,17 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
         ye = Ye.values
         lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
         hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
+        pred_e = base.predict(Xe)                          # la prévision doit être DANS la bande (cohérent affichage)
         for niv, _a in _IC_ALPHA:
             L = lo_e - np.asarray(Q_bas[niv]); U = hi_e + np.asarray(Q_haut[niv])
             crois = L > U                                  # 50% resserré au point de croiser
             mid = 0.5 * (L + U); L = np.where(crois, mid, L); U = np.where(crois, mid, U)
+            if niv != "50":                                # cohérent avec l'affichage (95/99 contiennent la prévision)
+                L = np.minimum(L, pred_e); U = np.maximum(U, pred_e)
             couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
         # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
-        L95 = lo_e - np.asarray(Q_bas["95"]); U95 = hi_e + np.asarray(Q_haut["95"])
+        L95 = np.minimum(lo_e - np.asarray(Q_bas["95"]), pred_e)
+        U95 = np.maximum(hi_e + np.asarray(Q_haut["95"]), pred_e)
         a95 = 0.05
         largeur = U95 - L95
         interval_score = largeur + (2 / a95) * np.maximum(0, L95 - ye) + (2 / a95) * np.maximum(0, ye - U95)
