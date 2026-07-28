@@ -214,7 +214,7 @@
         <div class="champ-controle">
           <select id="opt-temp-mode">
             <option value="moyenne">moyenne du jour</option>
-            <option value="minmax">min, max, moyenne</option>
+            <option value="minmax" selected>min, max, moyenne</option>
             <option value="horaire">horaire (24 valeurs)</option>
           </select>
         </div>
@@ -242,9 +242,10 @@
           <select id="opt-var-modele">
             <option value="gradient_boosting">Gradient Boosting quantile</option>
             <option value="ridge">Ridge quantile (linéaire, plus lent)</option>
+            <option value="monte_carlo">Monte Carlo (ensemble de réseaux)</option>
           </select>
         </div>
-        <span class="champ-aide">Modèle des bornes haute/basse (régression quantile, calibrée par conformal), séparé du modèle de débit.</span>
+        <span class="champ-aide">Modèle des bornes haute/basse, séparé du modèle de débit. Monte Carlo = plusieurs réseaux de neurones dont le désaccord donne l'incertitude (façon MC Dropout, plus lent).</span>
       </div>
 
       <div class="champ-reglage">

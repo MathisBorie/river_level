@@ -764,8 +764,9 @@ async def _fit_modele(nom, Xtr, Ytr, Xte, Yte, targets, prog=None, arret=None, i
     return m, {"r2": float(r2_score(Yte, pred)), "detail": [float(x) for x in r2]}
 
 
-MODELES_VAR = ("gradient_boosting", "ridge")
-NOMS_VAR = {"gradient_boosting": "Gradient Boosting quantile", "ridge": "Ridge quantile", "foret": "Forêt aléatoire"}
+MODELES_VAR = ("gradient_boosting", "ridge", "monte_carlo")
+NOMS_VAR = {"gradient_boosting": "Gradient Boosting quantile", "ridge": "Ridge quantile",
+            "monte_carlo": "Monte Carlo (ensemble)", "foret": "Forêt aléatoire"}
 
 
 def _reg_var_neuf(type_var):
@@ -863,14 +864,22 @@ def _ic_par_horizon(regs, X, pred, horizons):
     if regs.get("k_bas"):        # ancré sur la prévision, deux côtés indépendants + conditionnel borné
         kb, kh = regs["k_bas"], regs["k_haut"]
         smb, smh = regs["s_med_bas"], regs["s_med_haut"]
+        # écarts conditionnels de la ligne, par horizon, selon la source
+        if regs.get("source") == "mc":
+            membres = np.stack([np.asarray(m.predict(X)[0]) for m in regs["ensemble"]])   # (N, nh)
+            sig = np.maximum(membres.std(axis=0), 1e-9)
+            s_bas_h = {h: float(sig[h]) for h in horizons}
+            s_haut_h = dict(s_bas_h)
+        else:
+            s_bas_h = {h: max(float(pred[h]) - float(regs["q_lo"][h].predict(X)[0]), 1e-9) for h in horizons}
+            s_haut_h = {h: max(float(regs["q_hi"][h].predict(X)[0]) - float(pred[h]), 1e-9) for h in horizons}
         for niv, _a in _IC_ALPHA:
             d = {}
             for h in horizons:
                 p = float(pred[h])
-                lo = float(regs["q_lo"][h].predict(X)[0]); hi = float(regs["q_hi"][h].predict(X)[0])
-                m_bas = min(_IC_MOD_HI, max(_IC_MOD_LO, max(p - lo, 1e-9) / smb[h]))   # modulation bornée
-                m_haut = min(_IC_MOD_HI, max(_IC_MOD_LO, max(hi - p, 1e-9) / smh[h]))  # (gère aussi prév hors quantiles)
-                bas = p - kb[niv][h] * m_bas; haut = p + kh[niv][h] * m_haut           # prévision TOUJOURS au centre
+                m_bas = min(_IC_MOD_HI, max(_IC_MOD_LO, s_bas_h[h] / smb[h]))    # modulation bornée
+                m_haut = min(_IC_MOD_HI, max(_IC_MOD_LO, s_haut_h[h] / smh[h]))
+                bas = p - kb[niv][h] * m_bas; haut = p + kh[niv][h] * m_haut     # prévision TOUJOURS au centre
                 d[h] = (max(0.0, bas), max(0.0, haut))
             out[niv] = d
         return out
@@ -910,55 +919,97 @@ def _ic_par_horizon(regs, X, pred, horizons):
     return out
 
 
+async def _fit_ensemble_mc(Xm, Ym, prog=None, arret=None, n=6):
+    """Ensemble profond « façon MC Dropout » sans TensorFlow : n petits réseaux de
+    neurones (MLP), chacun entraîné sur un TIRAGE différent des données (bootstrap)
+    + une graine différente. Leur DÉSACCORD point par point donne l'incertitude —
+    même idée Monte-Carlo que le dropout (moyenne + écart-type d'un modèle
+    stochastique), mais avec plusieurs réseaux au lieu d'un seul tiré N fois.
+    Multi-sortie (tous les horizons d'un coup) : n entraînements suffisent."""
+    from sklearn.neural_network import MLPRegressor
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.compose import TransformedTargetRegressor
+    prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
+    rng = np.random.default_rng(42)
+    ens = []
+    for i in range(n):
+        arret()
+        idx = rng.choice(len(Xm), len(Xm), replace=True)   # bootstrap = source de variabilité
+        reseau = make_pipeline(
+            StandardScaler(),                              # les réseaux ont besoin de features normalisées
+            MLPRegressor(hidden_layer_sizes=(64, 32), alpha=1e-3, learning_rate_init=0.005,
+                         max_iter=300, early_stopping=True, n_iter_no_change=12, random_state=i))
+        mdl = TransformedTargetRegressor(regressor=reseau, transformer=StandardScaler())  # cible normalisée aussi
+        mdl.fit(Xm.iloc[idx], Ym.iloc[idx])
+        ens.append(mdl)
+        prog("Incertitude (Monte Carlo)", int((i + 1) / n * 100), i + 1, n)
+        await asyncio.sleep(0)
+    return ens
+
+
 async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="gradient_boosting", prog=None, arret=None):
-    """Incertitude ANCRÉE SUR LA PRÉVISION, chaque côté indépendamment :
-      • deux modèles de QUANTILE — bas 2,5 % et haut 97,5 % — appris sur le jeu
-        MODÈLE (Gradient Boosting quantile ou Ridge quantile) : ils donnent la
-        FORME conditionnelle (bande fine si calme, large si agité) ;
-      • sur la CALIBRATION, on regarde les résidus autour de la prévision séparés
-        « sous » / « au-dessus » ; pour chaque niveau (50/95/99) on cherche, de
-        chaque côté, le facteur qui attrape la bonne fraction des résidus de CE
-        côté (L de chaque côté → L au total) → la prévision est TOUJOURS au centre ;
-      • la forme conditionnelle module la largeur, BORNÉE à [×0.4, ×2.5] pour ne
-        pas exploser sur une queue lourde (crues) ;
-      • couverture + note (globale et 1re semaine) mesurées sur l'ÉVALUATION."""
+    """Incertitude ANCRÉE SUR LA PRÉVISION, chaque côté indépendamment. La FORME
+    conditionnelle de la bande (fine si calme, large si agité) vient d'une source
+    au choix (`type_var`) :
+      • 'gradient_boosting'/'ridge' : deux modèles de QUANTILE (bas 2,5 %, haut
+        97,5 %) — l'écart prévision→quantile donne la forme ;
+      • 'monte_carlo' : ENSEMBLE de petits réseaux (façon MC Dropout, sans TF) —
+        leur écart-type de désaccord donne la forme.
+    Ensuite, commun aux deux : sur la CALIBRATION on sépare les résidus autour de
+    la prévision « sous » / « au-dessus » et, pour chaque niveau (50/95/99), on
+    cherche de chaque côté le facteur qui attrape la bonne fraction des résidus de
+    CE côté (L de chaque côté → L au total) → prévision TOUJOURS au centre. La
+    forme module la largeur, BORNÉE à [×0.4, ×2.5] pour ne pas exploser sur une
+    queue lourde. Couverture + note (globale et 1re semaine) mesurées sur l'ÉVAL."""
     prog = prog or (lambda *a, **k: None); arret = arret or (lambda: None)
     nh = len(targets)
     Ym_v = Ym.values
-    q_lo, q_hi = [], []
-    for h in range(nh):
-        arret()
-        mlo = _reg_quantile_neuf(type_var, 0.025); mlo.fit(Xm, Ym_v[:, h]); q_lo.append(mlo)
-        mhi = _reg_quantile_neuf(type_var, 0.975); mhi.fit(Xm, Ym_v[:, h]); q_hi.append(mhi)
-        prog("Incertitude (CQR)", int((h + 1) / nh * 100), h + 1, nh)
-        if h % 2 == 0:
-            await asyncio.sleep(0)
+    source = "mc" if type_var == "monte_carlo" else "quantile"
+
+    def _npred(X):
+        p = np.asarray(base.predict(X))
+        return p.reshape(-1, 1) if p.ndim == 1 else p
+
+    if source == "mc":
+        ensemble = await _fit_ensemble_mc(Xm, Ym, prog, arret)
+
+        def _spreads(X, pX):                                # écart-type de désaccord de l'ensemble (symétrique)
+            membres = np.stack([np.asarray(m.predict(X)) for m in ensemble])   # (N, n, nh)
+            sig = np.maximum(membres.std(axis=0), 1e-9)
+            return sig, sig
+    else:
+        q_lo, q_hi = [], []
+        for h in range(nh):
+            arret()
+            mlo = _reg_quantile_neuf(type_var, 0.025); mlo.fit(Xm, Ym_v[:, h]); q_lo.append(mlo)
+            mhi = _reg_quantile_neuf(type_var, 0.975); mhi.fit(Xm, Ym_v[:, h]); q_hi.append(mhi)
+            prog("Incertitude (quantiles)", int((h + 1) / nh * 100), h + 1, nh)
+            if h % 2 == 0:
+                await asyncio.sleep(0)
+
+        def _spreads(X, pX):                                # écart prévision -> quantile bas / haut
+            lo = np.column_stack([q_lo[h].predict(X) for h in range(nh)])
+            hi = np.column_stack([q_hi[h].predict(X) for h in range(nh)])
+            return np.maximum(pX - lo, 1e-9), np.maximum(hi - pX, 1e-9)
 
     # --- calage ANCRÉ SUR LA PRÉVISION, chaque côté INDÉPENDAMMENT (sur calibration).
-    #     On regarde les résidus autour de la prévision, séparés en « sous » et
-    #     « au-dessus ». Les modèles de quantile donnent la FORME conditionnelle
-    #     (écart prévision->quantile, qui s'adapte à la météo), et pour chaque
-    #     niveau on cherche, de chaque côté, le facteur qui attrape la bonne
-    #     fraction des résidus de CE côté (L de chaque côté -> L au total). La
-    #     prévision est donc TOUJOURS au centre ; bande asymétrique ET
-    #     conditionnelle, sans division instable (plancher par côté). ---
+    #     Résidus autour de la prévision séparés « sous » / « au-dessus » ; pour
+    #     chaque niveau, de chaque côté, le facteur qui attrape la bonne fraction
+    #     des résidus de CE côté (L par côté -> L au total). Prévision au centre. ---
     Yc_v = Yc.values
-    pred_c = np.asarray(base.predict(Xc))
-    if pred_c.ndim == 1:
-        pred_c = pred_c.reshape(-1, 1)
+    pred_c = _npred(Xc)
+    slo_c, shi_c = _spreads(Xc, pred_c)
     k_bas = {niv: [] for niv, _a in _IC_ALPHA}
     k_haut = {niv: [] for niv, _a in _IC_ALPHA}
     s_med_bas, s_med_haut = [], []
     for h in range(nh):
         arret()
-        pc = pred_c[:, h]
-        s_bas_raw = np.maximum(pc - q_lo[h].predict(Xc), 1e-9)      # écart prévision -> quantile bas (forme conditionnelle)
-        s_haut_raw = np.maximum(q_hi[h].predict(Xc) - pc, 1e-9)     # écart quantile haut -> prévision
-        smb = max(1e-9, float(np.median(s_bas_raw))); smh = max(1e-9, float(np.median(s_haut_raw)))
+        smb = max(1e-9, float(np.median(slo_c[:, h]))); smh = max(1e-9, float(np.median(shi_c[:, h])))
         s_med_bas.append(smb); s_med_haut.append(smh)
-        m_bas = np.clip(s_bas_raw / smb, _IC_MOD_LO, _IC_MOD_HI)    # modulation conditionnelle BORNÉE
-        m_haut = np.clip(s_haut_raw / smh, _IC_MOD_LO, _IC_MOD_HI)
-        r = Yc_v[:, h] - pc
+        m_bas = np.clip(slo_c[:, h] / smb, _IC_MOD_LO, _IC_MOD_HI)   # modulation conditionnelle BORNÉE
+        m_haut = np.clip(shi_c[:, h] / smh, _IC_MOD_LO, _IC_MOD_HI)
+        r = Yc_v[:, h] - pred_c[:, h]
         sous = r < 0                                       # valeurs SOUS la prévision / AU-DESSUS
         u_bas = (-r[sous]) / m_bas[sous] if sous.any() else np.zeros(1)
         u_haut = r[~sous] / m_haut[~sous] if (~sous).any() else np.zeros(1)
@@ -969,20 +1020,21 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
             k_haut[niv].append(float(np.quantile(u_haut, min(1.0, L * (na + 1) / na))))
         if h % 3 == 0:
             await asyncio.sleep(0)
-    regs = {"cqr": True, "k_bas": k_bas, "k_haut": k_haut, "s_med_bas": s_med_bas,
-            "s_med_haut": s_med_haut, "q_lo": q_lo, "q_hi": q_hi, "type_var": type_var}
+    regs = {"cqr": True, "source": source, "k_bas": k_bas, "k_haut": k_haut,
+            "s_med_bas": s_med_bas, "s_med_haut": s_med_haut, "type_var": type_var}
+    if source == "mc":
+        regs["ensemble"] = ensemble
+    else:
+        regs["q_lo"] = q_lo; regs["q_hi"] = q_hi
 
     # --- couverture réelle + notes, sur le jeu d'ÉVALUATION (jamais vu) ---
     couverture = {}
     if Xe is not None and len(Xe):
         ye = Ye.values
-        pred_e = np.asarray(base.predict(Xe))
-        if pred_e.ndim == 1:
-            pred_e = pred_e.reshape(-1, 1)
-        lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
-        hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
-        m_bas_e = np.clip(np.maximum(pred_e - lo_e, 1e-9) / np.asarray(s_med_bas), _IC_MOD_LO, _IC_MOD_HI)
-        m_haut_e = np.clip(np.maximum(hi_e - pred_e, 1e-9) / np.asarray(s_med_haut), _IC_MOD_LO, _IC_MOD_HI)
+        pred_e = _npred(Xe)
+        slo_e, shi_e = _spreads(Xe, pred_e)
+        m_bas_e = np.clip(slo_e / np.asarray(s_med_bas), _IC_MOD_LO, _IC_MOD_HI)
+        m_haut_e = np.clip(shi_e / np.asarray(s_med_haut), _IC_MOD_LO, _IC_MOD_HI)
         for niv, _a in _IC_ALPHA:
             L = pred_e - np.asarray(k_bas[niv]) * m_bas_e
             U = pred_e + np.asarray(k_haut[niv]) * m_haut_e
@@ -1039,7 +1091,7 @@ def _decouper3(df, feats, targets, mode_split, part_sigma, part_eval):
 async def entrainer(code, coords=None, past=15, horizon=15, annees=10,
                     modeles=("ridge", "lineaire", "gradient_boosting"),
                     log=None, prog=None, arret=None, debut_str=None, fin_str=None, seuil_pca=99,
-                    mode_split="annees_aleatoires", part_test=0.2, temp_mode="moyenne",
+                    mode_split="annees_aleatoires", part_test=0.2, temp_mode="minmax",
                     var_modele="gradient_boosting", part_sigma=0.3, part_eval=0.2):
     log = log or (lambda m: None)
     prog = prog or (lambda *a, **k: None)
@@ -1184,7 +1236,7 @@ async def _run_points(jid, code, body):
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
-                               temp_mode=body.get("temp_mode", "moyenne"),
+                               temp_mode=body.get("temp_mode", "minmax"),
                                var_modele=body.get("var_modele", "gradient_boosting"),
                                part_sigma=float(body.get("part_sigma") or 0.3),
                                part_eval=float(body.get("part_eval") or 0.2))
@@ -1318,7 +1370,7 @@ async def _run_pipeline(jid, code, body):
                                seuil_pca=float(body.get("seuil_energie") or 99),
                                mode_split=body.get("mode_split", "annees_aleatoires"),
                                part_test=float(body.get("part_test") or 0.2),
-                               temp_mode=body.get("temp_mode", "moyenne"),
+                               temp_mode=body.get("temp_mode", "minmax"),
                                var_modele=body.get("var_modele", "gradient_boosting"),
                                part_sigma=float(body.get("part_sigma") or 0.3),
                                part_eval=float(body.get("part_eval") or 0.2))
