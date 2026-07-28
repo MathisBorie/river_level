@@ -847,19 +847,22 @@ _Z_IC = {"50": 0.674, "95": 1.960, "99": 2.576}
 
 
 def _ic_par_horizon(regs, X, pred, horizons):
-    """{niv: {h: (bas, haut)}} en L/s pour une ligne X. CQR (quantiles + correction
-    conforme Q ; 50/99 par extrapolation gaussienne du 95%) si dispo, sinon anciens
-    formats (sigma conforme ou z-score) pour rétro-compat."""
+    """{niv: {h: (bas, haut)}} en L/s pour une ligne X. CQR (quantiles bas/haut +
+    correction conforme Q CALIBRÉE PAR NIVEAU — 50/95/99 chacun sur les vrais
+    résidus, un seul score par horizon) si dispo, sinon anciens formats (sigma
+    conforme ou z-score) pour rétro-compat."""
     out = {}
     if regs.get("cqr"):
+        Q = regs["Q"]
         for niv, _a in _IC_ALPHA:
-            f = _Z_IC[niv] / _Z_IC["95"]     # facteur gaussien depuis le 95% calibré
+            qn = Q[niv] if isinstance(Q, dict) else Q   # rétro-compat : ancien Q par horizon (95% seul)
             d = {}
             for h in horizons:
                 lo = float(regs["q_lo"][h].predict(X)[0]); hi = float(regs["q_hi"][h].predict(X)[0])
-                U95 = hi + regs["Q"][h]; L95 = lo - regs["Q"][h]
-                whaut = max(1e-9, U95 - pred[h]); wbas = max(1e-9, pred[h] - L95)
-                d[h] = (max(0.0, pred[h] - f * wbas), pred[h] + f * whaut)
+                bas = lo - qn[h]; haut = hi + qn[h]      # Q<0 au 50% -> resserre ; Q>0 au 99% -> élargit
+                if bas > haut:                            # 50% resserré au point de croiser -> point médian
+                    bas = haut = 0.5 * (bas + haut)
+                d[h] = (max(0.0, bas), max(0.0, haut))
             out[niv] = d
         return out
     # anciens formats
@@ -901,31 +904,34 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
         if h % 2 == 0:
             await asyncio.sleep(0)
 
-    # --- correction conforme Q par horizon, sur le jeu de calibration ---
+    # --- correction conforme Q, sur le jeu de calibration : UN seul score par
+    #     horizon (E), dont on prend TROIS quantiles (50/95/99). Q<0 au 50%
+    #     resserre la bande ; Q>0 au 99% l'élargit. Les 3 niveaux sont donc
+    #     calibrés sur les vrais résidus (cohérents), sans hypothèse gaussienne. ---
     Yc_v = Yc.values; nc = max(1, len(Yc_v))
-    niveau = min(1.0, (1 - 0.05) * (nc + 1) / nc)   # 95 %
-    Q = []
+    Q = {niv: [] for niv, _a in _IC_ALPHA}
     for h in range(nh):
         lo = q_lo[h].predict(Xc); hi = q_hi[h].predict(Xc)
-        E = np.maximum(lo - Yc_v[:, h], Yc_v[:, h] - hi)   # score de non-conformité
-        Q.append(float(np.quantile(E, niveau)))
+        E = np.maximum(lo - Yc_v[:, h], Yc_v[:, h] - hi)   # score de non-conformité (calculé 1 fois)
+        for niv, a in _IC_ALPHA:
+            niveau = min(1.0, (1 - a) * (nc + 1) / nc)     # quantile conforme du niveau
+            Q[niv].append(float(np.quantile(E, niveau)))
     regs = {"cqr": True, "q_lo": q_lo, "q_hi": q_hi, "Q": Q, "type_var": type_var}
 
-    # --- couverture réelle + note, sur le jeu d'évaluation (asymétrique + gaussien) ---
+    # --- couverture réelle + note, sur le jeu d'ÉVALUATION (jamais vu) ---
     couverture = {}
     if Xe is not None and len(Xe):
         ye = Ye.values
-        pred_e = base.predict(Xe)
         lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
         hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
-        Qa = np.asarray(Q)
-        U95 = hi_e + Qa; L95 = lo_e - Qa
-        whaut = np.maximum(1e-9, U95 - pred_e); wbas = np.maximum(1e-9, pred_e - L95)
         for niv, _a in _IC_ALPHA:
-            f = _Z_IC[niv] / _Z_IC["95"]
-            U = pred_e + f * whaut; L = pred_e - f * wbas
+            Qn = np.asarray(Q[niv])
+            L = lo_e - Qn; U = hi_e + Qn
+            crois = L > U                                  # 50% resserré au point de croiser
+            mid = 0.5 * (L + U); L = np.where(crois, mid, L); U = np.where(crois, mid, U)
             couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
         # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
+        Q95 = np.asarray(Q["95"]); U95 = hi_e + Q95; L95 = lo_e - Q95
         a95 = 0.05
         largeur = U95 - L95
         interval_score = largeur + (2 / a95) * np.maximum(0, L95 - ye) + (2 / a95) * np.maximum(0, ye - U95)
