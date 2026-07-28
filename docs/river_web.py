@@ -782,14 +782,17 @@ def _reg_var_neuf(type_var):
 
 def _reg_quantile_neuf(type_var, q):
     """Régresseur de QUANTILE `q` (bord haut/bas), au choix de l'utilisateur.
-    'ridge' = régression quantile linéaire ; sinon Gradient Boosting quantile."""
+    'ridge' = régression quantile linéaire ; sinon Gradient Boosting quantile.
+    Capacité proche du modèle de débit (profondeur 6) : sinon les quantiles
+    ressortent quasi CONSTANTS et la bande ne s'adapte pas au contexte (météo,
+    saison). C'est ce qui donne des IC uniformes trop prudents."""
     if type_var == "ridge":
         from sklearn.linear_model import QuantileRegressor
         return QuantileRegressor(quantile=q, alpha=0.0, solver="highs")
-    return HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=100, max_depth=3,
-                                         max_leaf_nodes=15, learning_rate=0.08, min_samples_leaf=40,
-                                         l2_regularization=2.0, early_stopping=True, validation_fraction=0.1,
-                                         n_iter_no_change=8, random_state=42)
+    return HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=200, max_depth=6,
+                                         max_leaf_nodes=31, learning_rate=0.06, min_samples_leaf=20,
+                                         l2_regularization=5.0, early_stopping=True, validation_fraction=0.1,
+                                         n_iter_no_change=12, random_state=42)
 
 
 def _reg_variance(X, r, cote, type_var):
@@ -853,13 +856,17 @@ def _ic_par_horizon(regs, X, pred, horizons):
     conforme ou z-score) pour rétro-compat."""
     out = {}
     if regs.get("cqr"):
-        Q = regs["Q"]
+        Qb, Qh = regs.get("Q_bas"), regs.get("Q_haut")
+        if Qb is None:                                   # rétro-compat : ancien Q symétrique
+            Q = regs.get("Q")
+            Qb = Qh = Q if isinstance(Q, dict) else {niv: Q for niv, _a in _IC_ALPHA}
         for niv, _a in _IC_ALPHA:
-            qn = Q[niv] if isinstance(Q, dict) else Q   # rétro-compat : ancien Q par horizon (95% seul)
+            qbn = Qb[niv] if isinstance(Qb, dict) else Qb
+            qhn = Qh[niv] if isinstance(Qh, dict) else Qh
             d = {}
             for h in horizons:
                 lo = float(regs["q_lo"][h].predict(X)[0]); hi = float(regs["q_hi"][h].predict(X)[0])
-                bas = lo - qn[h]; haut = hi + qn[h]      # Q<0 au 50% -> resserre ; Q>0 au 99% -> élargit
+                bas = lo - qbn[h]; haut = hi + qhn[h]    # Q<0 au 50% -> resserre ; Q>0 au 99% -> élargit
                 if bas > haut:                            # 50% resserré au point de croiser -> point médian
                     bas = haut = 0.5 * (bas + haut)
                 d[h] = (max(0.0, bas), max(0.0, haut))
@@ -904,19 +911,23 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
         if h % 2 == 0:
             await asyncio.sleep(0)
 
-    # --- correction conforme Q, sur le jeu de calibration : UN seul score par
-    #     horizon (E), dont on prend TROIS quantiles (50/95/99). Q<0 au 50%
-    #     resserre la bande ; Q>0 au 99% l'élargit. Les 3 niveaux sont donc
-    #     calibrés sur les vrais résidus (cohérents), sans hypothèse gaussienne. ---
+    # --- correction conforme ASYMÉTRIQUE, par niveau, sur le jeu de calibration.
+    #     Deux scores séparés par horizon : E_bas (y passé SOUS la borne basse) et
+    #     E_haut (y passé AU-DESSUS de la borne haute). On calibre chaque côté à
+    #     a/2 -> couverture 1-a, mais la difficulté du HAUT (crues) ne tire plus la
+    #     borne du BAS. Trois niveaux (50/95/99) en prenant trois quantiles. ---
     Yc_v = Yc.values; nc = max(1, len(Yc_v))
-    Q = {niv: [] for niv, _a in _IC_ALPHA}
+    Q_bas = {niv: [] for niv, _a in _IC_ALPHA}
+    Q_haut = {niv: [] for niv, _a in _IC_ALPHA}
     for h in range(nh):
         lo = q_lo[h].predict(Xc); hi = q_hi[h].predict(Xc)
-        E = np.maximum(lo - Yc_v[:, h], Yc_v[:, h] - hi)   # score de non-conformité (calculé 1 fois)
+        E_bas = lo - Yc_v[:, h]                             # >0 si y sous la borne basse
+        E_haut = Yc_v[:, h] - hi                            # >0 si y au-dessus de la borne haute
         for niv, a in _IC_ALPHA:
-            niveau = min(1.0, (1 - a) * (nc + 1) / nc)     # quantile conforme du niveau
-            Q[niv].append(float(np.quantile(E, niveau)))
-    regs = {"cqr": True, "q_lo": q_lo, "q_hi": q_hi, "Q": Q, "type_var": type_var}
+            niveau = min(1.0, (1 - a / 2) * (nc + 1) / nc)  # a/2 par côté
+            Q_bas[niv].append(float(np.quantile(E_bas, niveau)))
+            Q_haut[niv].append(float(np.quantile(E_haut, niveau)))
+    regs = {"cqr": True, "q_lo": q_lo, "q_hi": q_hi, "Q_bas": Q_bas, "Q_haut": Q_haut, "type_var": type_var}
 
     # --- couverture réelle + note, sur le jeu d'ÉVALUATION (jamais vu) ---
     couverture = {}
@@ -925,13 +936,12 @@ async def _fit_incertitude(base, Xm, Ym, Xc, Yc, Xe, Ye, targets, type_var="grad
         lo_e = np.column_stack([q_lo[h].predict(Xe) for h in range(nh)])
         hi_e = np.column_stack([q_hi[h].predict(Xe) for h in range(nh)])
         for niv, _a in _IC_ALPHA:
-            Qn = np.asarray(Q[niv])
-            L = lo_e - Qn; U = hi_e + Qn
+            L = lo_e - np.asarray(Q_bas[niv]); U = hi_e + np.asarray(Q_haut[niv])
             crois = L > U                                  # 50% resserré au point de croiser
             mid = 0.5 * (L + U); L = np.where(crois, mid, L); U = np.where(crois, mid, U)
             couverture[niv] = round(float(((ye >= L) & (ye <= U)).mean()) * 100, 1)
         # NOTE = score d'intervalle de Winkler au 95% (pénalise largeur ET dépassements)
-        Q95 = np.asarray(Q["95"]); U95 = hi_e + Q95; L95 = lo_e - Q95
+        L95 = lo_e - np.asarray(Q_bas["95"]); U95 = hi_e + np.asarray(Q_haut["95"])
         a95 = 0.05
         largeur = U95 - L95
         interval_score = largeur + (2 / a95) * np.maximum(0, L95 - ye) + (2 / a95) * np.maximum(0, ye - U95)
