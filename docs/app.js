@@ -1041,8 +1041,17 @@ async function preparerBacktest() {
 
 $("btn-backtest").addEventListener("click", async () => {
   const modele = $("backtest-modele").value;
-  const date = $("backtest-date").value;
+  let date = $("backtest-date").value;
   if (!date) return toast("Choisis une date de test.", true);
+  // Recale sur la date de test disponible la plus proche (si on a la liste).
+  if (etat.datesTest && etat.datesTest.length && !etat.datesTest.includes(date)) {
+    const cible = new Date(date).getTime();
+    date = etat.datesTest.reduce((a, b) =>
+      Math.abs(new Date(a) - cible) < Math.abs(new Date(b) - cible) ? a : b
+    );
+    $("backtest-date").value = date;
+    toast(`Date ajustée à la plus proche disponible : ${dateFr(date)}`);
+  }
   const hybride = $("backtest-hybride").checked ? 1 : 0;
   const nbJours = parseInt($("backtest-jours").value) || 15;
   // Si la date n'est pas déjà dans le jeu stocké, le moteur télécharge la fenêtre.
