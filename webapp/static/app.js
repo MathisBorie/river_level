@@ -148,8 +148,26 @@ function dessinerCourbe(canvasId, labels, datasets, pivotIndex = null) {
   });
 }
 
+// Niveaux d'IC cochés pour un graphe ("backtest" / "prevision").
+function nivIC(graphe) {
+  return Array.from(document.querySelectorAll(`.ic-niv[data-graphe="${graphe}"]:checked`)).map((c) => c.value);
+}
+
+// Tableau R² par horizon (J+0 … J+n).
+function tableauR2(sd, nbJours) {
+  if (!sd || !sd.length) return "";
+  const scores = sd.slice(0, nbJours + 1);
+  return "<table><tr><th>Horizon</th>" +
+    scores.map((_, i) => `<th>J+${i}</th>`).join("") +
+    "</tr><tr><td>R²</td>" +
+    scores.map((s) => `<td>${(s * 100).toFixed(0)}%</td>`).join("") +
+    "</tr></table>";
+}
+
 // Fan chart : passé observé + prévision + bandes IC (+ réel pour le backtest).
-function rendreFanChart(canvasId, data, avecReel) {
+// niveaux : liste des IC à dessiner (["50","95","99"] filtrés) ; par défaut ["95"].
+function rendreFanChart(canvasId, data, avecReel, niveaux) {
+  niveaux = niveaux || ["95"];
   const obs = data.observe || [];
   const pts = data.points || [];
   if (!pts.length) return;
@@ -171,7 +189,7 @@ function rendreFanChart(canvasId, data, avecReel) {
     ["50", "rgba(13, 148, 136, 0.30)"],   // teal
   ];
   if (data.hybride) {
-    bandes.forEach(([niv, couleur]) => {
+    bandes.filter(([niv]) => niveaux.includes(niv)).forEach(([niv, couleur]) => {
       const bas = vide(N), haut = vide(N);
       pts.forEach((p, i) => { bas[base + i] = p[`ic${niv}_bas`]; haut[base + i] = p[`ic${niv}_haut`]; });
       datasets.push({ label: `_bas${niv}`, data: bas, borderColor: "transparent", pointRadius: 0, fill: false });
@@ -292,6 +310,7 @@ function reinitialiserAffichageStation() {
   $("image-pca").classList.add("cache");
   $("image-pca").removeAttribute("src");
   ["chart-prevision", "chart-backtest", "chart-historique", "chart-pca"].forEach(detruireChart);
+  etat.dernierBacktest = null; etat.dernierePrevision = null;
   if (chartPca) { chartPca = null; }
   $("zone-pca").style.display = "none";
   $("pca-resultat").innerHTML = "";
@@ -1073,26 +1092,18 @@ $("btn-backtest").addEventListener("click", async () => {
     $("backtest-date").value = date;
     toast(`Date ajustée à la plus proche disponible : ${dateFr(date)}`);
   }
-  const hybride = $("backtest-hybride").checked ? 1 : 0;
   const nbJours = parseInt($("backtest-jours").value) || 15;
   // Si la date n'est pas déjà dans le jeu stocké, le moteur télécharge la fenêtre.
   const stockee = etat.datesTest && etat.datesTest.includes(date);
   $("btn-backtest").disabled = true;
   $("btn-backtest").textContent = stockee ? "Test…" : "Téléchargement…";
   try {
-    const res = await api(`/api/riviere/${etat.code}/backtest?modele=${modele}&date=${date}&hybride=${hybride}&nb_jours=${nbJours}`);
-    rendreFanChart("chart-backtest", res, true);
+    const res = await api(`/api/riviere/${etat.code}/backtest?modele=${modele}&date=${date}&hybride=1&nb_jours=${nbJours}`);
+    etat.dernierBacktest = res;   // gardé pour re-dessiner quand on change les IC cochés
+    rendreFanChart("chart-backtest", res, true, nivIC("backtest"));
     rendreFiabilite("fiab-backtest", res);
     $("vide-backtest").style.display = "none";
-    if (res.scores_detail) {
-      const scores = res.scores_detail.slice(0, nbJours + 1);
-      $("scores-detail").innerHTML =
-        "<table><tr><th>Horizon</th>" +
-        scores.map((_, i) => `<th>J+${i}</th>`).join("") +
-        "</tr><tr><td>R²</td>" +
-        scores.map((s) => `<td>${(s * 100).toFixed(0)}%</td>`).join("") +
-        "</tr></table>";
-    }
+    $("scores-detail").innerHTML = tableauR2(res.scores_detail, nbJours);
   } catch (e) {
     toast(e.message, true);
   } finally {
@@ -1104,15 +1115,16 @@ $("btn-backtest").addEventListener("click", async () => {
 // ---------------------------------------------------------------- prévision réelle
 $("btn-prevision").addEventListener("click", async () => {
   const modele = $("prevision-modele").value;
-  const hybride = $("prevision-hybride").checked ? 1 : 0;
   const nbJours = parseInt($("prevision-jours").value) || 15;
   $("btn-prevision").disabled = true;
   $("btn-prevision").textContent = "Téléchargement météo prévisionnelle…";
   try {
-    const res = await api(`/api/riviere/${etat.code}/prevision?modele=${modele}&hybride=${hybride}&nb_jours=${nbJours}`);
-    rendreFanChart("chart-prevision", res, false);
+    const res = await api(`/api/riviere/${etat.code}/prevision?modele=${modele}&hybride=1&nb_jours=${nbJours}`);
+    etat.dernierePrevision = res;   // gardé pour re-dessiner quand on change les IC cochés
+    rendreFanChart("chart-prevision", res, false, nivIC("prevision"));
     rendreFiabilite("fiab-prevision", res);
     $("vide-prevision").style.display = "none";
+    $("scores-detail-prevision").innerHTML = tableauR2(res.scores_detail, nbJours);
     // Tableau détaillé (dans le popover ⓘ), à partir des points prévus (hors pivot).
     const prev = (res.points || []).slice(1);
     const avecIC = res.hybride;
@@ -1133,6 +1145,17 @@ $("btn-prevision").addEventListener("click", async () => {
     $("btn-prevision").disabled = false;
     $("btn-prevision").textContent = "Prédire le futur";
   }
+});
+
+// Changer les IC cochés re-dessine le graphe concerné (sans refaire de calcul).
+document.querySelectorAll(".ic-niv").forEach((c) => {
+  c.addEventListener("change", () => {
+    if (c.dataset.graphe === "backtest" && etat.dernierBacktest) {
+      rendreFanChart("chart-backtest", etat.dernierBacktest, true, nivIC("backtest"));
+    } else if (c.dataset.graphe === "prevision" && etat.dernierePrevision) {
+      rendreFanChart("chart-prevision", etat.dernierePrevision, false, nivIC("prevision"));
+    }
+  });
 });
 
 // ---------------------------------------------------------------- historique
