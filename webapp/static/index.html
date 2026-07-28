@@ -240,9 +240,9 @@
         <label>Modèle de l'incertitude</label>
         <div class="champ-controle">
           <select id="opt-var-modele">
+            <option value="monte_carlo" selected>Monte Carlo (ensemble de réseaux)</option>
             <option value="gradient_boosting">Gradient Boosting quantile</option>
             <option value="ridge">Ridge quantile (linéaire, plus lent)</option>
-            <option value="monte_carlo">Monte Carlo (ensemble de réseaux)</option>
           </select>
         </div>
         <span class="champ-aide">Modèle des bornes haute/basse, séparé du modèle de débit. Monte Carlo = plusieurs réseaux de neurones dont le désaccord donne l'incertitude (façon MC Dropout, plus lent).</span>
