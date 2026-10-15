@@ -30,16 +30,17 @@ from pyodide.http import pyfetch
 STORE = {}      # code -> entraînement {"test","feats","targets","modeles","scores","meta"}
 ZONES = {}      # code -> bassin versant {"geojson_bassins","points_par_zone","noms_zones","surface_bv"}
 SELECTION = {}  # code -> sélection de points {"points_preselectionnes","altitudes_preselection","coords_finales"}
-VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]   # journalières natives (défaut)
+VARS_METEO = ["rain_sum", "temperature_2m_mean", "snowfall_sum", "et0_fao_evapotranspiration"]   # journalières natives (défaut)
 
 
 def _vars_meteo(temp_mode="moyenne"):
     """Colonnes météo journalières (features) selon le mode de température :
     'moyenne' = 1 colonne, 'minmax' = min/max/moyenne, 'horaire' = 24 valeurs/jour."""
     if temp_mode == "minmax":
-        return ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max", "snowfall_sum"]
+        return ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max",
+                "snowfall_sum", "et0_fao_evapotranspiration"]
     if temp_mode == "horaire":
-        return ["rain_sum", "snowfall_sum"] + [f"temp_h{h}" for h in range(24)]
+        return ["rain_sum", "snowfall_sum", "et0_fao_evapotranspiration"] + [f"temp_h{h}" for h in range(24)]
     return list(VARS_METEO)
 
 # ---------------------------------------------------------------- persistance
@@ -322,11 +323,12 @@ async def meteo_moyenne(coords, start, end, forecast=False, temp_mode="moyenne")
     lat = ",".join(str(c[0]) for c in coords)
     lon = ",".join(str(c[1]) for c in coords)
     if temp_mode == "minmax":
-        daily_vars = ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max", "snowfall_sum"]
+        daily_vars = ["rain_sum", "temperature_2m_mean", "temperature_2m_min", "temperature_2m_max",
+                      "snowfall_sum", "et0_fao_evapotranspiration"]
     elif temp_mode == "horaire":
-        daily_vars = ["rain_sum", "snowfall_sum"]
+        daily_vars = ["rain_sum", "snowfall_sum", "et0_fao_evapotranspiration"]
     else:
-        daily_vars = ["rain_sum", "temperature_2m_mean", "snowfall_sum"]
+        daily_vars = ["rain_sum", "temperature_2m_mean", "snowfall_sum", "et0_fao_evapotranspiration"]
     url = (f"{base}?latitude={lat}&longitude={lon}&start_date={start}&end_date={end}"
            f"&daily={','.join(daily_vars)}")
     if temp_mode == "horaire":
@@ -345,6 +347,9 @@ async def meteo_moyenne(coords, start, end, forecast=False, temp_mode="moyenne")
     if not dailies:
         return pd.DataFrame(columns=["date"] + _vars_meteo(temp_mode))
     df = pd.concat(dailies).groupby("date", as_index=False).mean()
+    for v in daily_vars:                       # garde-fou : colonne manquante (réponse partielle) -> 0, pas de KeyError
+        if v not in df.columns:
+            df[v] = 0.0
     if temp_mode == "horaire" and hourlies:
         hp = pd.concat(hourlies)
         hp["date"] = hp["dt"].dt.normalize(); hp["h"] = hp["dt"].dt.hour

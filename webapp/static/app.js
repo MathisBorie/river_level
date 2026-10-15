@@ -1269,7 +1269,7 @@ $("btn-prevision").addEventListener("click", async () => {
     toast(e.message, true);
   } finally {
     $("btn-prevision").disabled = false;
-    $("btn-prevision").textContent = "Prédire le futur";
+    $("btn-prevision").textContent = "Prévoir";
   }
 });
 
