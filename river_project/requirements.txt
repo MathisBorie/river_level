@@ -1,0 +1,23 @@
+# Python 3.12. Versions minimales testées.
+numpy>=2.1
+pandas>=2.3
+pyarrow>=25          # cache en parquet
+scipy>=1.14
+scikit-learn>=1.6
+joblib>=1.4
+requests>=2.32
+tqdm
+
+# bassins versants (BasinATLAS)
+geopandas>=1.1
+pyogrio>=0.11
+shapely>=2.1
+
+# réseaux de neurones
+tensorflow>=2.20     # keras
+torch>=2.14
+
+# graphes
+matplotlib>=3.10
+plotly>=7.0
+# folium             # seulement pour une carte du notebook 02
