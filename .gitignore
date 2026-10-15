@@ -26,3 +26,5 @@ river_project/doc/*.pdf
 river_project/doc/idees.md
 # accès privé à la source des débits (jamais publié)
 river_project/src/riverapp_acces.py
+# projet QGIS local (chemins absolus vers les données)
+river_project/data/carte.qgz
