@@ -1,9 +1,28 @@
+# --- général
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
 .DS_Store
-donnees_travail/
-cartes_html/
-webapp/data/
+.env
+*.log
 
+# --- brouillon/ : ancien projet
+brouillon/donnees_travail/
+brouillon/cartes_html/
+brouillon/webapp/data/
 # données mises en cache (artefacts)
-webapp/*.csv
+brouillon/webapp/*.csv
+
+# --- river_project/ : nouveau projet
+# données lourdes ou retéléchargeables (BasinATLAS, caches, sorties)
+river_project/data/hydroatlas/*
+river_project/data/hydrobasins/*
+river_project/data/cache/*
+river_project/data/outputs/*
+!river_project/data/**/.gitkeep
+# documentation officielle (PDF lourds, à retélécharger depuis HydroSHEDS)
+river_project/doc/*.pdf
+# pistes de recherche personnelles, pas publiées
+river_project/doc/idees.md
+# accès privé à la source des débits (jamais publié)
+river_project/src/riverapp_acces.py

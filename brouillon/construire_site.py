@@ -9,7 +9,7 @@ from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent
 STATIC = RACINE / "webapp" / "static"
-DOCS = RACINE / "docs"
+DOCS = RACINE.parent / "docs"      # le site publié reste à la racine du dépôt (Pages sert main:/docs)
 DOCS.mkdir(exist_ok=True)
 
 OVERLAY = '''<body>

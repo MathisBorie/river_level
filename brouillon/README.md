@@ -1,4 +1,8 @@
-# river_level
+# river_level — première version (archive)
+
+> Cette première version est conservée telle quelle dans `brouillon/`. Le site River Lab (`docs/`
+> à la racine du dépôt) se construit depuis ce dossier avec `python brouillon/construire_site.py`.
+> Le projet actuel est dans `river_project/`.
 
 Ce projet a pour objectif de prédire le niveau d'eau des rivières. Un projet qui lie mes études en mathématiques/science de la donnée et ma pratique de kayakiste de rivière à très bon niveau.
 
