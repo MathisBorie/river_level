@@ -6,7 +6,8 @@
 #   3. les 41 carreaux, tous les runs, les plus anciens d'abord.
 # Puis chaque nouveau run du jour. Relance toute seule après QuotaEpuise (1 h) ou une erreur (10 min).
 import sys, time, datetime as dt
-sys.path.insert(0, "/Users/mathis/ponts/projet/river_project")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # le dossier river_project
 import pandas as pd
 from src.bassins import charger_bassins, ForetBassins, carreaux_amont
 from src.meteo import PrevisionsArchivees, QuotaEpuise

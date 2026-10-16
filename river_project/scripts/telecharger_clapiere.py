@@ -1,6 +1,7 @@
 # Téléchargement météo de La Clapière (41 carreaux, 10 variables, 1980-01-01 → 2026-10-03) ; relance toute seule après QuotaEpuise.
 import sys, time, datetime as dt
-sys.path.insert(0, "/Users/mathis/ponts/projet/river_project")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # le dossier river_project
 from src.bassins import charger_bassins, ForetBassins, carreaux_amont
 from src.meteo import Meteo, QuotaEpuise
 H = ["precipitation", "temperature_2m", "snow_depth", "shortwave_radiation", "rain", "soil_moisture_7_to_28cm",

@@ -29,8 +29,9 @@ Pour une station de mesure, on cherche à prévoir le débit à quelques jours.
    du capteur.
 4. **Modèles** : réseaux de neurones (Keras / PyTorch), évalués par station et par échéance.
 
-Le code est dans `river_project/src/`, les étapes sont détaillées dans les notebooks
-(`river_project/notebooks/`) et le diagramme de classes dans `river_project/UML.md`.
+Le guide de lecture (notebooks dans l'ordre, rôle de chaque module) est dans
+[`river_project/README.md`](river_project/README.md) ; le diagramme de classes dans
+[`river_project/UML.md`](river_project/UML.md).
 
 ### Lancer
 

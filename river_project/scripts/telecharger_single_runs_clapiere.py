@@ -2,7 +2,8 @@
 # La Clapière : d'abord les 7 carreaux choisis par F.choisir_carreaux() (notebook 05), puis les 34 autres.
 # Relance toute seule après QuotaEpuise (toutes les heures) ou une erreur (10 min) ; relancer le script reprend où il en était.
 import sys, time, datetime as dt
-sys.path.insert(0, "/Users/mathis/ponts/projet/river_project")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # le dossier river_project
 from src.bassins import charger_bassins, ForetBassins, carreaux_amont
 from src.meteo import PrevisionsArchivees, QuotaEpuise
 DEBUT, FIN = "2024-03-14", "2026-10-10"
