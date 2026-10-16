@@ -19,27 +19,6 @@ module de `src/` du même nom.
 | `08_glofas` | Comparaison avec GloFAS, le modèle hydrologique de Copernicus *(brouillon)* |
 | `00_brouillon` | Essais |
 
-## Vue d'ensemble
-
-```mermaid
-flowchart LR
-  S1["BasinATLAS<br/>bassins versants"] --> bassins
-  S2["Open-Meteo<br/>météo"] --> meteo
-  S3["API des débits<br/>(privée)"] --> hydro
-  bassins --> features
-  meteo --> features
-  hydro --> features
-  features --> modeles
-  reseaux --> modeles
-  modeles --> graphes
-  station["station<br/>point d'entrée"] -.-> features
-  station -.-> modeles
-```
-
-Trois sources alimentent `features` (les entrées X et la cible Y), qui nourrit les modèles ;
-`station` relie le tout pour une station donnée. Le diagramme de classes complet est dans
-[`UML.md`](UML.md).
-
 ## Le code (`src/`)
 
 | Module | Rôle |
@@ -53,6 +32,8 @@ Trois sources alimentent `features` (les entrées X et la cible Y), qui nourrit 
 | `station.py` | Point d'entrée : une station, son bassin, ses données, ses modèles |
 | `graphes.py` | Graphiques interactifs des résultats |
 | `config.py` | Chemins et réglages (les secrets sont lus dans `.env`, jamais écrits) |
+
+Diagramme de classes : [`UML.md`](UML.md).
 
 ## Autres dossiers
 
