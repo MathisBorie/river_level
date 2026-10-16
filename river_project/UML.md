@@ -256,7 +256,6 @@ classDiagram
       +stations(fournisseur, auth) DataFrame
       +mesures(id, debut, fin, auth) DataFrame
     }
-    RiverApp ..> riverapp_acces_py : télécharge si le fichier existe
     class StationRiverApp {
       <<ligne de stations_fournisseur.parquet>>
       +str id, clé : identifiant RiverApp
@@ -341,7 +340,8 @@ classDiagram
   hydro_py ..> MesuresAuPas : produit
   hydro_py ..> MesureHydro : filtre les pics, sans toucher au cache
   MesuresAuPas ..> MesureHydro : interpole
-  RiverApp ..> config_py : adresse, fournisseur, identifiants
+  RiverApp ..> riverapp_acces_py : télécharge, si le fichier privé existe
+  RiverApp ..> config_py : identifiants
   Meteo ..> config_py : abonnement, clé
   RiverApp *-- "0..*" MesureHydro : cache
   RiverApp *-- "0..*" CouvertureHydro : couverture
